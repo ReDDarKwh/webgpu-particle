@@ -3,7 +3,7 @@ import shader from './shaders/shader.wgsl?raw';
 import particleSimShader from './shaders/particleSim.wgsl?raw';
 import stringTemplate from './stringTemplate';
 
-const { device, canvasFormat, context } = await Setup();
+const { device, canvasFormat, context } = await setup();
 
 const particleShaderModule = device.createShaderModule({
   label: "Particle shader",
@@ -70,30 +70,51 @@ const bindGroup = device.createBindGroup({
   entries: [],
 });
 
+const renderPassDescriptor = {
+  label: 'our basic canvas renderPass',
+  colorAttachments: [
+    {
+      clearValue: [0.3, 0.3, 0.3, 1],
+      loadOp: 'clear',
+      storeOp: 'store',
+    },
+  ],
+};
+
 async function update(time: number): Promise<void> {
-  
+
   const encoder = device.createCommandEncoder();
   
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [{
-      view: context!.getCurrentTexture().createView(),
-      loadOp: "clear",
-      clearValue: [0.15, 0.1, 0.2, 1],
-      storeOp: "store",
-    }]
-  });
+  compute(encoder);
+  render(encoder);
   
+  device.queue.submit([encoder.finish()]);
+
+  requestAnimationFrame(update)
+}
+
+requestAnimationFrame(update)
+
+async function compute(encoder : GPUCommandEncoder) {
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(computePipeline);
+  pass.dispatchWorkgroups(10, 10);
+  pass.end();
+}
+
+async function render(encoder : GPUCommandEncoder) {
+  
+  const canvasTexture = context.getCurrentTexture();
+    ((renderPassDescriptor.colorAttachments[0]) as any).view =
+        canvasTexture.createView();
+        
+  const pass = encoder.beginRenderPass(renderPassDescriptor as GPURenderPassDescriptor);
   pass.setPipeline(renderPipeline);
   pass.draw(6); // 6 vertices
   pass.end();
-  
-  device.queue.submit([encoder.finish()]);
-  
-  requestAnimationFrame(update)
 }
-requestAnimationFrame(update)
 
-async function Setup() {
+async function setup() {
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
     <canvas width="512" height="512"></canvas>
