@@ -95,14 +95,14 @@ async function update(time: number): Promise<void> {
 
 requestAnimationFrame(update)
 
-async function compute(encoder : GPUCommandEncoder) {
+function compute(encoder : GPUCommandEncoder) {
   const pass = encoder.beginComputePass();
   pass.setPipeline(computePipeline);
   pass.dispatchWorkgroups(10, 10);
   pass.end();
 }
 
-async function render(encoder : GPUCommandEncoder) {
+function render(encoder : GPUCommandEncoder) {
   
   const canvasTexture = context.getCurrentTexture();
     ((renderPassDescriptor.colorAttachments[0]) as any).view =
