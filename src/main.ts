@@ -1,34 +1,60 @@
 import './style.css';
 import shader from './shaders/shader.wgsl?raw';
 import particleSimShader from './shaders/particleSim.wgsl?raw';
+import particle from './shaders/particle.wgsl?raw';
 import stringTemplate from './stringTemplate';
 
 const { device, canvasFormat, context } = await setup();
 
+const WORKGROUP_SIZE = 64;
+
+const WORKGROUP_NUM = 2;
+
+const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
+
 const particleShaderModule = device.createShaderModule({
   label: "Particle shader",
-  code: stringTemplate(shader, {})
+  code: stringTemplate(shader, {particleStruct: particle})
 });
 
 const particleComputeShaderModule = device.createShaderModule({
   label:"Compute shader", 
-  code: stringTemplate(particleSimShader, {})
+  code: stringTemplate(particleSimShader, {particleStruct: particle, workgroupSize: WORKGROUP_SIZE})
 });
 
 const bindGroupLayout = device.createBindGroupLayout({
   entries: [
     {
-      binding: 0,
-      visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-      buffer: {
-        type: "storage"
+      binding:0,
+      visibility: GPUShaderStage.VERTEX,
+      buffer:{
+        type: "read-only-storage",
       }
     },
     {
-      binding: 0,
+      binding:1,
       visibility: GPUShaderStage.COMPUTE,
-      buffer: {
-        type: "read-only-storage"
+      buffer:{
+        type: "storage",
+      }
+    }
+  ]
+});
+
+const renderBindGroupLayout = device.createBindGroupLayout({
+  entries: [
+    {
+      binding:0,
+      visibility: GPUShaderStage.FRAGMENT,
+      sampler:{
+        type:"filtering"
+      }
+    },
+    {
+      binding:1,
+      visibility: GPUShaderStage.FRAGMENT,
+      texture:{
+        sampleType:"float"
       }
     }
   ]
@@ -36,20 +62,71 @@ const bindGroupLayout = device.createBindGroupLayout({
 
 const pipelineLayout = device.createPipelineLayout({
   bindGroupLayouts:[
-    bindGroupLayout
+    bindGroupLayout,
+    renderBindGroupLayout
   ]
 });
 
-const computePipeline = device.createComputePipeline({
-  layout: pipelineLayout,
-  compute: {
-    module : particleComputeShaderModule,
-    entryPoint : "updateParticle"
-  }
-})
+const particleStorageUnitSize = 
+4 * 2 + // position is 2 32bit floats (4bytes each) 
+4 * 2;  // velocity is 2 32bit floats (4bytes each) 
+const particleStorageSizeInBytes = particleStorageUnitSize * PARTICLE_MAX_COUNT;
+
+const particleStorageBuffer0 = device.createBuffer({
+  label: "Particle storage buffer 0",
+  size: particleStorageSizeInBytes,
+  usage : GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+});
+
+const particleStorageBuffer1 = device.createBuffer({
+  label: "Particle storage buffer 1",
+  size: particleStorageSizeInBytes,
+  usage : GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+});
+
+const particleStorageValues = new Float32Array(particleStorageSizeInBytes / 4);
+
+for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
+  const offset = particleStorageUnitSize / 4 * i;
+  particleStorageValues.set([rand(), rand()], offset);
+}
+
+device.queue.writeBuffer(particleStorageBuffer0, 0, particleStorageValues);
+
+const ctx = new OffscreenCanvas(32,32).getContext('2d')!;
+
+const grd = ctx.createRadialGradient(16, 16, 12, 16, 16, 16);
+grd.addColorStop(0, "white");
+grd.addColorStop(1, "rgba(255,255,255,0)");
+
+// Draw a filled Rectangle
+ctx.fillStyle = grd;
+ctx.fillRect(0, 0, 32, 32);
+
+const texture = device.createTexture({
+  size: [32, 32],
+  format: 'rgba8unorm',
+  usage: GPUTextureUsage.TEXTURE_BINDING |
+         GPUTextureUsage.COPY_DST |
+         GPUTextureUsage.RENDER_ATTACHMENT,
+});
+
+device.queue.copyExternalImageToTexture(
+  { source: ctx.canvas, flipY: true },
+  { texture, premultipliedAlpha: true },
+  [32, 32],
+);
+
+// const computePipeline = device.createComputePipeline({
+//   layout: pipelineLayout,
+//   compute: {
+//     module : particleComputeShaderModule,
+//     entryPoint : "updateParticle"
+//   }
+// })
 
 const renderPipeline = device.createRenderPipeline({
-  label: "Cell pipeline",
+  label: "Particle render pipeline",
   layout: pipelineLayout,
   vertex: {
     module: particleShaderModule,
@@ -58,17 +135,72 @@ const renderPipeline = device.createRenderPipeline({
   fragment: {
     module: particleShaderModule,
     entryPoint: "fragmentMain",
-    targets: [{
-      format: canvasFormat
-    }]
+    targets: [
+      {
+       format: canvasFormat,
+        blend: {
+          color: {
+            srcFactor: 'one',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+          alpha: {
+            srcFactor: 'one',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+        },
+      },
+    ],
   }
 });
 
-const bindGroup = device.createBindGroup({
-  label: "Cell renderer bind group",
+const bindGroup0 = device.createBindGroup({
   layout: renderPipeline.getBindGroupLayout(0),
-  entries: [],
+  entries:[
+    {
+      binding:0,
+      resource: {buffer: particleStorageBuffer0}
+    },
+    {
+      binding:1,
+      resource: {buffer: particleStorageBuffer1}
+    }
+  ]
 });
+
+const bindGroup1 = device.createBindGroup({
+  layout: renderPipeline.getBindGroupLayout(0),
+  entries:[
+    {
+      binding:0,
+      resource: {buffer: particleStorageBuffer1}
+    },
+    {
+      binding:1,
+      resource: {buffer: particleStorageBuffer0}
+    }
+  ]
+});
+
+const sampler = device.createSampler({
+  minFilter: 'linear',
+  magFilter: 'linear',
+});
+
+const renderBindGroup = device.createBindGroup({
+  layout: renderPipeline.getBindGroupLayout(1),
+  entries:[
+    {
+      binding:0,
+      resource: sampler
+    },
+    {
+      binding:1,
+      resource: texture.createView()
+    }
+  ]
+})
 
 const renderPassDescriptor = {
   label: 'our basic canvas renderPass',
@@ -85,7 +217,7 @@ async function update(time: number): Promise<void> {
 
   const encoder = device.createCommandEncoder();
   
-  compute(encoder);
+  //compute(encoder);
   render(encoder);
   
   device.queue.submit([encoder.finish()]);
@@ -95,22 +227,24 @@ async function update(time: number): Promise<void> {
 
 requestAnimationFrame(update)
 
-function compute(encoder : GPUCommandEncoder) {
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(computePipeline);
-  pass.dispatchWorkgroups(10, 10);
-  pass.end();
-}
+// function compute(encoder : GPUCommandEncoder) {
+//   const pass = encoder.beginComputePass();
+//   pass.setPipeline(computePipeline);
+//   pass.dispatchWorkgroups(10, 10);
+//   pass.end();
+// }
 
 function render(encoder : GPUCommandEncoder) {
   
   const canvasTexture = context.getCurrentTexture();
     ((renderPassDescriptor.colorAttachments[0]) as any).view =
         canvasTexture.createView();
-        
+
   const pass = encoder.beginRenderPass(renderPassDescriptor as GPURenderPassDescriptor);
   pass.setPipeline(renderPipeline);
-  pass.draw(6); // 6 vertices
+  pass.setBindGroup(0, bindGroup0);
+  pass.setBindGroup(1, renderBindGroup);
+  pass.draw(6, PARTICLE_MAX_COUNT); // 6 vertices
   pass.end();
 }
 
@@ -149,3 +283,7 @@ async function setup() {
   });
   return { device, canvasFormat, context };
 }
+
+function rand (min = 0, max = 1) {
+  return min + Math.random() * (max - min);
+};

@@ -1,42 +1,44 @@
+${particleStruct}
 
-struct VertexInput {
-  @location(0) pos: vec2f,
-  @builtin(instance_index) instance: u32,
+const SIZE : f32 = 0.05;
+
+struct VSOutput {
+  @builtin(position) position: vec4f,
+  @location(0) texcoord: vec2f,
 };
 
-struct VertexOutput {
-  @builtin(position) pos: vec4f,
-  @location(0) cell: vec2f, // New line!
-};
-
-
-@group(0) @binding(0) var<uniform> grid: vec2f;
-@group(0) @binding(1) var<storage> cellState: array<u32>; // New!
+@group(0) @binding(0) var<storage, read> particles: array<Particle>;
 
 @vertex
-fn vertexMain(@location(0) pos: vec2f,
-              @builtin(instance_index) instance: u32) -> VertexOutput {
-  let i = f32(instance);
-  let cell = vec2f(i % grid.x, floor(i / grid.x));
-  let state = f32(cellState[instance]); // New line!
+fn vertexMain(
+  @builtin(vertex_index) vertexIndex : u32,
+  @builtin(instance_index) instance : u32
+) -> VSOutput {
 
-  let cellOffset = cell / grid * 2;
-  // New: Scale the position by the cell's active state.
-  let gridPos = (pos*state+1) / grid - 1 + cellOffset;
+  let verts = array(
+  vec2f(-1, 1),
+  vec2f(-1, -1),
+  vec2f(1, 1),
+  vec2f(1, -1),
+  vec2f(1, 1),
+  vec2f(-1, -1)
+  );
 
-  var output: VertexOutput;
-  output.pos = vec4f(gridPos, 0, 1);
-  output.cell = cell;
-  return output;
+  var vertexPosition = verts[vertexIndex];
+  let pos = vertexPosition * SIZE - 1 + particles[instance].position * 2;
+  
+  var vsOut: VSOutput;
+  vsOut.position = vec4f(pos, 0.0, 1.0);
+  vsOut.texcoord = vertexPosition * 0.5 + 0.5;
+
+  return vsOut;
 }
 
-struct FragInput {
-  @location(0) cell: vec2f,
-};
+@group(1) @binding(0) var s: sampler;
+@group(1) @binding(1) var t: texture_2d<f32>;
 
 @fragment
-fn fragmentMain(input: FragInput) -> @location(0) vec4f {
+fn fragmentMain(vsOut: VSOutput) -> @location(0) vec4f {
 
-  let c = input.cell / grid;
-  return vec4f(c.x, 1-c.x, 1-c.y, 1);
+  return textureSample(t, s, vsOut.texcoord);
 }
