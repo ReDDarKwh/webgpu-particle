@@ -22,50 +22,7 @@ const particleComputeShaderModule = device.createShaderModule({
   code: stringTemplate(particleSimShader, {particleStruct: particle, workgroupSize: WORKGROUP_SIZE})
 });
 
-const bindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding:0,
-      visibility: GPUShaderStage.VERTEX,
-      buffer:{
-        type: "read-only-storage",
-      }
-    },
-    {
-      binding:1,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer:{
-        type: "storage",
-      }
-    }
-  ]
-});
 
-const renderBindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding:0,
-      visibility: GPUShaderStage.FRAGMENT,
-      sampler:{
-        type:"filtering"
-      }
-    },
-    {
-      binding:1,
-      visibility: GPUShaderStage.FRAGMENT,
-      texture:{
-        sampleType:"float"
-      }
-    }
-  ]
-});
-
-const pipelineLayout = device.createPipelineLayout({
-  bindGroupLayouts:[
-    bindGroupLayout,
-    renderBindGroupLayout
-  ]
-});
 
 const particleStorageUnitSize = 
 4 * 2 + // position is 2 32bit floats (4bytes each) 
@@ -117,17 +74,62 @@ device.queue.copyExternalImageToTexture(
   [32, 32],
 );
 
-// const computePipeline = device.createComputePipeline({
-//   layout: pipelineLayout,
-//   compute: {
-//     module : particleComputeShaderModule,
-//     entryPoint : "updateParticle"
-//   }
-// })
+const particleBindGroupLayout = device.createBindGroupLayout({
+  entries:[
+    {
+      binding:0,
+      visibility : GPUShaderStage.VERTEX ,
+      buffer : {
+        type : 'read-only-storage'
+      }
+    },  
+    {
+      binding:1,
+      visibility : GPUShaderStage.COMPUTE,
+      buffer : {
+        type : 'storage'
+      }
+    }
+  ]
+});
+
+const computePipeline = device.createComputePipeline({
+  layout: device.createPipelineLayout({
+    bindGroupLayouts:[
+      particleBindGroupLayout
+    ]
+  }),
+  compute: {
+    module : particleComputeShaderModule,
+    entryPoint : "updateParticle"
+  }
+});
 
 const renderPipeline = device.createRenderPipeline({
   label: "Particle render pipeline",
-  layout: pipelineLayout,
+  layout: device.createPipelineLayout({
+    bindGroupLayouts:[
+      particleBindGroupLayout,
+      device.createBindGroupLayout({
+        entries: [
+          {
+            binding:0,
+            visibility: GPUShaderStage.FRAGMENT,
+            sampler:{
+              type:"filtering"
+            }
+          },
+          {
+            binding:1,
+            visibility: GPUShaderStage.FRAGMENT,
+            texture:{
+              sampleType:"float"
+            }
+          }
+        ]
+      })
+    ]
+  }),
   vertex: {
     module: particleShaderModule,
     entryPoint: "vertexMain"
@@ -156,7 +158,7 @@ const renderPipeline = device.createRenderPipeline({
 });
 
 const bindGroup0 = device.createBindGroup({
-  layout: renderPipeline.getBindGroupLayout(0),
+  layout: particleBindGroupLayout,
   entries:[
     {
       binding:0,
@@ -170,7 +172,7 @@ const bindGroup0 = device.createBindGroup({
 });
 
 const bindGroup1 = device.createBindGroup({
-  layout: renderPipeline.getBindGroupLayout(0),
+  layout: particleBindGroupLayout,
   entries:[
     {
       binding:0,
@@ -213,12 +215,14 @@ const renderPassDescriptor = {
   ],
 };
 
+let step = 0;
 async function update(time: number): Promise<void> {
 
+  step ++;
   const encoder = device.createCommandEncoder();
   
-  //compute(encoder);
-  render(encoder);
+  compute(encoder, step);
+  render(encoder, step);
   
   device.queue.submit([encoder.finish()]);
 
@@ -227,22 +231,24 @@ async function update(time: number): Promise<void> {
 
 requestAnimationFrame(update)
 
-// function compute(encoder : GPUCommandEncoder) {
-//   const pass = encoder.beginComputePass();
-//   pass.setPipeline(computePipeline);
-//   pass.dispatchWorkgroups(10, 10);
-//   pass.end();
-// }
+function compute(encoder : GPUCommandEncoder, step: number) {
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(computePipeline);
+  pass.setBindGroup(0, step % 2 == 0 ? bindGroup0 : bindGroup1);
+  pass.dispatchWorkgroups(WORKGROUP_NUM);
+  pass.end();
+}
 
-function render(encoder : GPUCommandEncoder) {
-  
+
+function render(encoder : GPUCommandEncoder, step: number) {
+
   const canvasTexture = context.getCurrentTexture();
     ((renderPassDescriptor.colorAttachments[0]) as any).view =
         canvasTexture.createView();
 
   const pass = encoder.beginRenderPass(renderPassDescriptor as GPURenderPassDescriptor);
   pass.setPipeline(renderPipeline);
-  pass.setBindGroup(0, bindGroup0);
+  pass.setBindGroup(0, step % 2 == 0 ? bindGroup0 : bindGroup1);
   pass.setBindGroup(1, renderBindGroup);
   pass.draw(6, PARTICLE_MAX_COUNT); // 6 vertices
   pass.end();
