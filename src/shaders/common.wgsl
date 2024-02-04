@@ -1,8 +1,11 @@
 
 struct Particle {
   position : vec2f,
+  oldPosition : vec2f, 
+
   velocity : vec2f,
-  gridCoords : vec2i,
+  oldVelocity : vec2f,
+  
   color : vec3f
 };
 

@@ -27,62 +27,71 @@ declare var WebGPURecorder : any;
 
 const { device, canvasFormat, context, stats } = await setup();
 
+const PARTICLE_SIZE = 5;
 const WORKGROUP_SIZE = 32;
-
-const WORKGROUP_NUM = 1;
-
+const WORKGROUP_NUM = 2 ;
 const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
 
-const PARTICLE_SIZE = 5;
+const GRID_SIZE_IN_CELLS = [
+  Math.sqrt(PARTICLE_MAX_COUNT),
+  Math.sqrt(PARTICLE_MAX_COUNT),
+];
 
-const GRID_CELL_SIZE = PARTICLE_SIZE * 2;
+const GRID_CELL_SIZE = context.canvas.width / GRID_SIZE_IN_CELLS[0];
 
 const PARTICLE_SPEED = 10;
 
-const GRID_SIZE = [
-  Math.ceil(context.canvas.width / GRID_CELL_SIZE),
-  Math.ceil(context.canvas.height / GRID_CELL_SIZE),
-];
 
-console.log(GRID_SIZE);
+console.log(GRID_SIZE_IN_CELLS);
+console.log(GRID_CELL_SIZE);
 
 const particleComputeShader = new particleSimShader(
   WORKGROUP_SIZE,
   "Compute shader",
   device,
-  GRID_SIZE
+  GRID_SIZE_IN_CELLS
 );
 const particleRenderShader = new renderParticleShader(
   "Particle shader",
   device,
-  GRID_SIZE
+  GRID_SIZE_IN_CELLS
 );
 
 const particleStorageUnitSize = particleComputeShader.structs["Particle"].size;
 
+console.log("ParticleStructSize : " + particleStorageUnitSize);
+
 const particleStorageSizeInBytes = particleStorageUnitSize * PARTICLE_MAX_COUNT;
 
-const gridStorageSizeInBytes = GRID_SIZE[0] * GRID_SIZE[1] * 4;
+const gridStorageSizeInBytes = GRID_SIZE_IN_CELLS[0] * GRID_SIZE_IN_CELLS[1] * 4;
 
+//#region Create Buffers
 const gridStorageBuffer = device.createBuffer({
   label: "grid storage buffer",
   size: gridStorageSizeInBytes,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
 
-const particleStorageBuffer0 = device.createBuffer({
-  label: "Particle storage buffer 0",
+const particleStorageBuffer = device.createBuffer({
+  label: "Particle storage buffer",
   size: particleStorageSizeInBytes,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
 
-const particleStorageBuffer1 = device.createBuffer({
-  label: "Particle storage buffer 1",
-  size: particleStorageSizeInBytes,
+const particleHeadsStorageBuffer = device.createBuffer({
+  label: "Particle heads storage buffer",
+  size: PARTICLE_MAX_COUNT * 4,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
 
-//const gridView = 
+const particleListsStorageBuffer = device.createBuffer({
+  label: "Particle lists storage buffer",
+  size: PARTICLE_MAX_COUNT * 4,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+
+//#endregion
+
 
 const particleView = makeStructuredView(
   particleComputeShader.storages["particles"],
@@ -97,7 +106,7 @@ for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   //   context.canvas.height / 2,
   // ]);
   
-  particleView.views[i].position.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
+  particleView.views[i].oldPosition.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
   const speed = PARTICLE_SPEED;
   particleView.views[i].velocity.set([
     Math.cos(angle) * speed,
@@ -105,7 +114,7 @@ for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   ]);
 }
 
-device.queue.writeBuffer(particleStorageBuffer0, 0, particleView.arrayBuffer);
+device.queue.writeBuffer(particleStorageBuffer, 0, particleView.arrayBuffer);
 
 const { view: simulationUniforms, buffer: simulationUniformsBuffer } =
   makeUniformViewAndBuffer(particleComputeShader, "SimulationUniforms");
@@ -177,7 +186,7 @@ const computeBindGroupLayout = device.createBindGroupLayout({
       binding: 0,
       visibility: GPUShaderStage.COMPUTE,
       buffer: {
-        type: "read-only-storage",
+        type: "storage",
       },
     },
     {
@@ -187,6 +196,13 @@ const computeBindGroupLayout = device.createBindGroupLayout({
         type: "storage",
       },
     },
+    {
+      binding: 2,
+      visibility: GPUShaderStage.COMPUTE,
+      buffer: {
+        type: "storage",
+      },
+    }
   ],
 });
 
@@ -208,6 +224,7 @@ const simulationBindGroupLayout = device.createBindGroupLayout({
     }
   ],
 });
+
 
 const gridComputePipeline = device.createComputePipeline({
   layout: device.createPipelineLayout({
@@ -306,7 +323,7 @@ const commonBindGroup = device.createBindGroup({
 
 
 const simulationBindGroup = device.createBindGroup({
-  label: "bindGroup0_c",
+  label: "simulationBindGroup",
   layout: simulationBindGroupLayout,
   entries: [
     {
@@ -326,27 +343,16 @@ const bindGroup0_c = device.createBindGroup({
   entries: [
     {
       binding: 0,
-      resource: { buffer: particleStorageBuffer0 },
+      resource: { buffer: particleStorageBuffer },
     },
     {
       binding: 1,
-      resource: { buffer: particleStorageBuffer1 },
-    },
-  ],
-});
-
-const bindGroup1_c = device.createBindGroup({
-  label: "bindGroup1_c",
-  layout: computeBindGroupLayout,
-  entries: [
-    {
-      binding: 0,
-      resource: { buffer: particleStorageBuffer1 },
+      resource: { buffer: particleHeadsStorageBuffer },
     },
     {
-      binding: 1,
-      resource: { buffer: particleStorageBuffer0 },
-    },
+      binding: 2,
+      resource: { buffer: particleListsStorageBuffer },
+    }
   ],
 });
 
@@ -356,18 +362,7 @@ const bindGroup0 = device.createBindGroup({
   entries: [
     {
       binding: 0,
-      resource: { buffer: particleStorageBuffer1 },
-    },
-  ],
-});
-
-const bindGroup1 = device.createBindGroup({
-  label: "bindGroup1",
-  layout: particleBindGroupLayout,
-  entries: [
-    {
-      binding: 0,
-      resource: { buffer: particleStorageBuffer0 },
+      resource: { buffer: particleStorageBuffer },
     },
   ],
 });
@@ -446,7 +441,7 @@ function compute(encoder: GPUCommandEncoder, step: number) {
   {
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, commonBindGroup);
-    pass.setBindGroup(1, step % 2 == 0 ? bindGroup1_c : bindGroup0_c);
+    pass.setBindGroup(1, bindGroup0_c);
     pass.setBindGroup(2, simulationBindGroup);
     pass.setPipeline(gridComputePipeline);
     pass.dispatchWorkgroups(WORKGROUP_NUM);
@@ -467,7 +462,7 @@ function render(encoder: GPUCommandEncoder, step: number) {
   );
   pass.setPipeline(renderPipeline);
   pass.setBindGroup(0, commonBindGroup);
-  pass.setBindGroup(1, step % 2 == 0 ? bindGroup1 : bindGroup0);
+  pass.setBindGroup(1, bindGroup0);
   pass.setBindGroup(2, renderBindGroup);
   pass.draw(6, PARTICLE_MAX_COUNT); // 6 vertices
   pass.end();
@@ -496,8 +491,11 @@ async function setup() {
 
   const context = canvas.getContext("webgpu");
 
-  canvas.width = appElement.clientWidth;
-  canvas.height = appElement.clientHeight;
+
+  const size = Math.min(appElement.clientWidth, appElement.clientHeight);
+
+  canvas.width = size;
+  canvas.height = size;
 
   if (!context) {
     throw new Error("Yo! No Canvas GPU context found.");

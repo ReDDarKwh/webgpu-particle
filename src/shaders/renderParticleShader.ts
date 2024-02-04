@@ -47,11 +47,6 @@ export default class renderParticleShader extends Shader{
                 vsOut.position = vec4f(pos, 0.0, 1.0);
                 vsOut.texcoord = vertexPosition * 0.5 + 0.5;
 
-
-                let normalizedGridPos = vec2f(particles[instance].gridCoords) / vec2f(gridSize);
-
-                let r = vec2f(random(vec2f(normalizedGridPos.xx)), random(vec2f(normalizedGridPos.yy)));
-                
                 vsOut.color = particles[instance].color;
 
                 return vsOut;
