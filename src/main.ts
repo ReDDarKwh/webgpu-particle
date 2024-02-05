@@ -25,11 +25,10 @@ declare var WebGPURecorder : any;
 // });
 
 
-const { device, canvasFormat, context, stats } = await setup();
 
 const PARTICLE_SIZE = 2;
-const WORKGROUP_SIZE = 32 * 8;
-const WORKGROUP_NUM = 1 ;
+const WORKGROUP_SIZE = 64;
+const WORKGROUP_NUM = 16;
 const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
 
 const GRID_SIZE_IN_CELLS = [
@@ -37,10 +36,11 @@ const GRID_SIZE_IN_CELLS = [
   Math.sqrt(PARTICLE_MAX_COUNT),
 ];
 
+const { device, canvasFormat, context, stats } = await setup();
+
 const GRID_CELL_SIZE = context.canvas.width / GRID_SIZE_IN_CELLS[0];
 
-const PARTICLE_SPEED = 50;
-
+const PARTICLE_SPEED = 25;
 
 console.log(GRID_SIZE_IN_CELLS);
 console.log(GRID_CELL_SIZE);
@@ -100,7 +100,7 @@ const random = () => {
 }
 
 for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
-  const angle = random() * 2 * Math.PI;
+  const angle = rand() * 2 * Math.PI;
   
   particleView.views[i].oldPosition.set([
     context.canvas.width / 2,
@@ -473,9 +473,13 @@ function render(encoder: GPUCommandEncoder, step: number) {
 
 async function setup() {
   const appElement = document.querySelector<HTMLDivElement>("#app")!;
-  appElement.innerHTML = `<canvas></canvas>`;
+  appElement.innerHTML = `
+  <canvas id="overlay"></canvas>
+  <canvas id="render"></canvas>
+  `;
 
-  const canvas = document.querySelector("canvas");
+  const canvas = document.querySelector("#render");
+  const overlay = document.querySelector("#overlay");
 
   if (!canvas) {
     throw new Error("Yo! No canvas found.");
@@ -499,6 +503,39 @@ async function setup() {
 
   canvas.width = size;
   canvas.height = size;
+
+  overlay.width = size;
+  overlay.height = size;
+
+ 
+
+
+function drawBoard(){
+
+    // Box width
+    var bw = size;
+    // Box height
+    var bh = size;
+    // Padding
+    var p = 0;
+
+    var cs = size / GRID_SIZE_IN_CELLS[0];
+
+    let context = overlay.getContext("2d");
+    for (var x = 0; x <= bw; x += cs) {
+        context.moveTo(0.5 + x + p, p);
+        context.lineTo(0.5 + x + p, bh + p);
+    }
+
+    for (var x = 0; x <= bh; x += cs) {
+        context.moveTo(p, 0.5 + x + p);
+        context.lineTo(bw + p, 0.5 + x + p);
+    }
+    context.strokeStyle = "black";
+    context.stroke();
+}
+
+drawBoard();
 
   if (!context) {
     throw new Error("Yo! No Canvas GPU context found.");

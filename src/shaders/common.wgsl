@@ -6,9 +6,7 @@ struct Particle {
   velocity : vec2f,
   oldVelocity : vec2f,
   
-  color : vec2f,
-  padding : vec2f
-  
+  color : vec2f
 };
 
 struct GlobalUniforms{
