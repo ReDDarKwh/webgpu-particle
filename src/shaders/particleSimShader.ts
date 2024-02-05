@@ -5,13 +5,18 @@ export default class particleSimShader extends Shader {
   /**
    *
    */
-  constructor(workgroupSize: number, label: string, device: GPUDevice, gridSize: number[]) {
+  constructor(
+    workgroupSize: number,
+    label: string,
+    device: GPUDevice,
+    gridSize: number[]
+  ) {
     super(
       /* wgsl */ `
             
         ${common}
 
-        const gridSize = vec2u(${gridSize[0], gridSize[1]});
+        const gridSize = vec2u(${(gridSize[0], gridSize[1])});
 
         struct SimulationUniforms{
             deltaTime: f32
@@ -38,12 +43,46 @@ export default class particleSimShader extends Shader {
             return v % m;                           // return v % m, now that both are positive
         }
 
-        fn getIndexFromGridPos(gridPos : vec2i) -> u32{
+        fn getIndexFromGridPos(gridPos : vec2f) -> i32{
 
             let floatGridSize = vec2f(gridSize);
-            let wrapped = vec2f(wrap(f32(gridPos.x), floatGridSize.x), wrap(f32(gridPos.y), floatGridSize.y));
+            let wrapped = vec2f(gridPos.x, gridPos.y);
 
-            return u32(wrapped.x + wrapped.y * floatGridSize.x);
+            if(gridPos.x < 0 || gridPos.x >= floatGridSize.x || gridPos.y < 0 || gridPos.y >= floatGridSize.y){
+                return -1;
+            }
+
+            return i32(wrapped.x + wrapped.y * floatGridSize.x);
+        }
+
+        fn collideParticles(particle: ptr<function, Particle>, otherParticle: Particle){
+
+            let v = (*particle).position - otherParticle.position;
+            let d = length(v);
+
+            if(d < globals.particleSize * 2){
+                (*particle).color = vec2f(1,0);
+            }
+        }
+
+        @compute @workgroup_size(${workgroupSize}) fn reset(
+            @builtin(workgroup_id) workgroup_id : vec3<u32>,
+            @builtin(local_invocation_index) local_invocation_index: u32,
+            @builtin(num_workgroups) num_workgroups: vec3<u32>
+        ){
+
+            let workgroup_index =  
+            workgroup_id.x +
+            workgroup_id.y * num_workgroups.x +
+            workgroup_id.z * num_workgroups.x * num_workgroups.y;
+        
+            let global_invocation_index =
+                workgroup_index * ${workgroupSize} +
+                local_invocation_index;
+
+            atomicStore(&particleHeads[global_invocation_index], -1);
+
+            particles[global_invocation_index].color = vec2f(0,1);
         }
         
         @compute @workgroup_size(${workgroupSize}) fn c0(
@@ -62,8 +101,35 @@ export default class particleSimShader extends Shader {
                 local_invocation_index;
 
             var p = particles[global_invocation_index];
+
+            var nextPos = p.oldPosition + p.velocity * simulation.deltaTime;
             
-            particles[global_invocation_index].position = p.oldPosition + p.velocity * simulation.deltaTime;
+            var screenWarpVec = vec2f(0,0);
+            
+            let particleSizeTimes2 = globals.particleSize * 2;
+
+            if(nextPos.x > globals.canvasSize.x){
+                screenWarpVec += vec2f(-globals.canvasSize.x, 0);
+            } else if (nextPos.x < 0) {
+                screenWarpVec += vec2f(globals.canvasSize.x, 0);
+            }
+            
+            if(nextPos.y > globals.canvasSize.y){
+                screenWarpVec = vec2f(0, -globals.canvasSize.y);
+            } else if (nextPos.y < 0) {
+                screenWarpVec = vec2f(0, globals.canvasSize.y);
+            }
+
+            nextPos += screenWarpVec;
+
+            particles[global_invocation_index].position = nextPos;
+            particles[global_invocation_index].oldPosition = nextPos;
+            
+            let gridCoords = nextPos / f32(globals.gridCellSizeInPixels);
+            let gridId = getIndexFromGridPos(gridCoords);
+            if(gridId != -1){
+                particleLists[global_invocation_index] = atomicExchange(&particleHeads[gridId], i32(global_invocation_index));
+            }
         }
 
         @compute @workgroup_size(${workgroupSize}) fn c1(
@@ -81,69 +147,45 @@ export default class particleSimShader extends Shader {
                 workgroup_index * ${workgroupSize} +
                 local_invocation_index;
 
-
             var p = particles[global_invocation_index];
-        
-            p.oldPosition = p.position;
 
-            particles[global_invocation_index] = p;
+            let gridCoords = p.oldPosition / f32(globals.gridCellSizeInPixels);
 
-            // let nextPos = particlesPast[global_invocation_index].position + 
-            // particlesPast[global_invocation_index].velocity * simulation.deltaTime;
+            for(var y = -1; y < 3; y++)
+            {
+                for(var x = -1; x < 3; x++)
+                {
+                    let gridCoordsWithOffset = gridCoords + vec2f(f32(x),f32(y)); 
+                    let gridCoordsIndex = getIndexFromGridPos(gridCoordsWithOffset);
+
+                    if(gridCoordsIndex == -1){
+                        continue;
+                    }
+
+                    var particleIndex = atomicLoad(&particleHeads[gridCoordsIndex]);
+
+                    while(particleIndex >= 0){
+                        
+                        if(particleIndex != i32(global_invocation_index)){
+
+                            let otherParticle = particles[particleIndex];
+
+                            let v = p.position - otherParticle.position;
+                            let d = length(v);
+
+                            if(d < globals.particleSize * 2){
+                                particles[global_invocation_index].color = vec2f(1,0);
+                            }
+                        }
+
+                        particleIndex = particleLists[particleIndex];
+                    }
+                }
+            }
+
+
+            //storageBarrier();
             
-            // var screenWarpVec = vec2f(0,0);
-
-            // let particleSizeTimes2 = globals.particleSize * 2;
-
-            // if(nextPos.x > globals.canvasSize.x + globals.particleSize){
-            //     screenWarpVec += vec2f(-globals.canvasSize.x - particleSizeTimes2, 0);
-            // } else if (nextPos.x < - globals.particleSize) {
-            //     screenWarpVec += vec2f(globals.canvasSize.x + particleSizeTimes2, 0);
-            // }
-
-            // if(nextPos.y > globals.canvasSize.y + globals.particleSize){
-            //     screenWarpVec = vec2f(0, -globals.canvasSize.y - particleSizeTimes2);
-            // } else if (nextPos.y < - globals.particleSize) {
-            //     screenWarpVec = vec2f(0, globals.canvasSize.y + particleSizeTimes2);
-            // }
-
-            // //particles[global_invocation_index].gridCoords
-
-            // let gridIndexN = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(0,1));
-            // let gridIndexNE = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(1,1));
-            // let gridIndexE = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(1,0));
-            // let gridIndexSE = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(1,-1));
-            // let gridIndexS = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(0,-1));
-            // let gridIndexSW = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(-1,-1));
-            // let gridIndexW = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(-1,0));
-            // let gridIndexNW = getIndexFromGridPos(particles[global_invocation_index].gridCoords + vec2i(-1,1));
-
-            // // let idN = atomicLoad(&grid[gridIndexN]);
-            // // let idNE = atomicLoad(&grid[gridIndexNE]);
-            // // let idE = atomicLoad(&grid[gridIndexE]);
-            // // let idSE = atomicLoad(&grid[gridIndexSE]);
-            // // let idS = atomicLoad(&grid[gridIndexSW]);
-            // // let idSW = atomicLoad(&grid[gridIndexW]);
-            // // let idW = atomicLoad(&grid[gridIndexW]);
-            // // let idNW = atomicLoad(&grid[gridIndexNW]);
-            // let idN = grid[gridIndexN];
-            // let idNE = grid[gridIndexNE];
-            // let idE = grid[gridIndexE];
-            // let idSE = grid[gridIndexSE];
-            // let idS = grid[gridIndexSW];
-            // let idSW = grid[gridIndexW];
-            // let idW = grid[gridIndexW];
-            // let idNW = grid[gridIndexNW];
-
-            // if(idN != 0 || idNE != 0 || idE != 0 || idSE != 0 || idS != 0 || idSW != 0 || idW != 0 || idNW != 0){
-            //     particles[global_invocation_index].color = vec3f(1,0,0);
-            // } else {
-            //     particles[global_invocation_index].color = vec3f(0,1,0);
-            // }
-
-
-            // particles[global_invocation_index].position = nextPos + screenWarpVec;
-
         } 
         `,
       label,

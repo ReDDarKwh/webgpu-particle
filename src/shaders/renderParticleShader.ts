@@ -19,12 +19,6 @@ export default class renderParticleShader extends Shader{
 
             @group(1) @binding(0) var<storage, read> particles: array<Particle>;
 
-            fn random (st : vec2f) -> f32 {
-                return fract(sin(dot(st.xy,
-                                     vec2(12.9898,78.233)))*
-                    43758.5453123);
-            }
-
             @vertex
             fn vertexMain(
             @builtin(vertex_index) vertexIndex : u32,
@@ -47,7 +41,7 @@ export default class renderParticleShader extends Shader{
                 vsOut.position = vec4f(pos, 0.0, 1.0);
                 vsOut.texcoord = vertexPosition * 0.5 + 0.5;
 
-                vsOut.color = particles[instance].color;
+                vsOut.color = vec3f(particles[instance].color.x,particles[instance].color.y, 0);
 
                 return vsOut;
             }

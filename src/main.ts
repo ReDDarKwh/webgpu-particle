@@ -27,9 +27,9 @@ declare var WebGPURecorder : any;
 
 const { device, canvasFormat, context, stats } = await setup();
 
-const PARTICLE_SIZE = 5;
-const WORKGROUP_SIZE = 32;
-const WORKGROUP_NUM = 2 ;
+const PARTICLE_SIZE = 2;
+const WORKGROUP_SIZE = 32 * 8;
+const WORKGROUP_NUM = 1 ;
 const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
 
 const GRID_SIZE_IN_CELLS = [
@@ -39,7 +39,7 @@ const GRID_SIZE_IN_CELLS = [
 
 const GRID_CELL_SIZE = context.canvas.width / GRID_SIZE_IN_CELLS[0];
 
-const PARTICLE_SPEED = 10;
+const PARTICLE_SPEED = 50;
 
 
 console.log(GRID_SIZE_IN_CELLS);
@@ -66,11 +66,6 @@ const particleStorageSizeInBytes = particleStorageUnitSize * PARTICLE_MAX_COUNT;
 const gridStorageSizeInBytes = GRID_SIZE_IN_CELLS[0] * GRID_SIZE_IN_CELLS[1] * 4;
 
 //#region Create Buffers
-const gridStorageBuffer = device.createBuffer({
-  label: "grid storage buffer",
-  size: gridStorageSizeInBytes,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
 
 const particleStorageBuffer = device.createBuffer({
   label: "Particle storage buffer",
@@ -98,15 +93,21 @@ const particleView = makeStructuredView(
   new ArrayBuffer(PARTICLE_MAX_COUNT * particleStorageUnitSize)
 );
 
-for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
-  const angle = rand() * 2 * Math.PI;
+var seed = 1;
+const random = () => {
+    var x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+}
 
-  // particleView.views[i].position.set([
-  //   context.canvas.width / 2,
-  //   context.canvas.height / 2,
-  // ]);
+for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
+  const angle = random() * 2 * Math.PI;
   
-  particleView.views[i].oldPosition.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
+  particleView.views[i].oldPosition.set([
+    context.canvas.width / 2,
+    context.canvas.height / 2,
+  ]);
+  
+  //particleView.views[i].oldPosition.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
   const speed = PARTICLE_SPEED;
   particleView.views[i].velocity.set([
     Math.cos(angle) * speed,
@@ -214,17 +215,23 @@ const simulationBindGroupLayout = device.createBindGroupLayout({
       buffer: {
         type: "uniform",
       },
-    },
-    {
-      binding:1,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer:{
-        type:"storage"
-      }
     }
   ],
 });
 
+const resetPipeline = device.createComputePipeline({
+  layout: device.createPipelineLayout({
+    bindGroupLayouts: [
+      commonBindGroupLayout,
+      computeBindGroupLayout,
+      simulationBindGroupLayout
+    ],
+  }),
+  compute: {
+    module: particleComputeShader.module,
+    entryPoint: "reset",
+  },
+});
 
 const gridComputePipeline = device.createComputePipeline({
   layout: device.createPipelineLayout({
@@ -329,10 +336,6 @@ const simulationBindGroup = device.createBindGroup({
     {
       binding: 0,
       resource: { buffer: simulationUniformsBuffer },
-    },
-    {
-      binding: 1,
-      resource: { buffer: gridStorageBuffer },
     }
   ],
 });
@@ -436,13 +439,13 @@ requestAnimationFrame(update);
 
 function compute(encoder: GPUCommandEncoder, step: number) {
 
-  encoder.clearBuffer(gridStorageBuffer);
-
   {
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, commonBindGroup);
     pass.setBindGroup(1, bindGroup0_c);
     pass.setBindGroup(2, simulationBindGroup);
+    pass.setPipeline(resetPipeline);
+    pass.dispatchWorkgroups(WORKGROUP_NUM);
     pass.setPipeline(gridComputePipeline);
     pass.dispatchWorkgroups(WORKGROUP_NUM);
     pass.setPipeline(computePipeline);

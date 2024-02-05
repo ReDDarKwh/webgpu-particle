@@ -6,7 +6,9 @@ struct Particle {
   velocity : vec2f,
   oldVelocity : vec2f,
   
-  color : vec3f
+  color : vec2f,
+  padding : vec2f
+  
 };
 
 struct GlobalUniforms{
@@ -16,3 +18,10 @@ struct GlobalUniforms{
 }
 
 @group(0) @binding(0) var<uniform> globals : GlobalUniforms;
+
+
+fn random (st : vec2f) -> f32 {
+                return fract(sin(dot(st.xy,
+                                     vec2(12.9898,78.233)))*
+                    43758.5453123);
+            }
