@@ -106,18 +106,18 @@ export default class particleSimShader extends Shader {
             
             var screenWarpVec = vec2f(0,0);
             
-            let particleSizeTimes2 = globals.particleSize * 2;
+            let particleSizeTimes2 = globals.particleSize * 4;
 
-            if(nextPos.x > globals.canvasSize.x){
-                screenWarpVec += vec2f(-globals.canvasSize.x, 0);
-            } else if (nextPos.x < 0) {
-                screenWarpVec += vec2f(globals.canvasSize.x, 0);
+            if(nextPos.x > globals.canvasSize.x - particleSizeTimes2){
+                particles[global_invocation_index].velocity *= vec2f(-1,0);
+            } else if (nextPos.x < particleSizeTimes2) {
+                particles[global_invocation_index].velocity *= vec2f(-1,0);
             }
             
-            if(nextPos.y > globals.canvasSize.y){
-                screenWarpVec = vec2f(0, -globals.canvasSize.y);
-            } else if (nextPos.y < 0) {
-                screenWarpVec = vec2f(0, globals.canvasSize.y);
+            if(nextPos.y > globals.canvasSize.y - particleSizeTimes2){
+                particles[global_invocation_index].velocity *= vec2f(0,-1);
+            } else if (nextPos.y < particleSizeTimes2) {
+                particles[global_invocation_index].velocity *= vec2f(0,-1);
             }
 
             nextPos += screenWarpVec;
@@ -147,9 +147,10 @@ export default class particleSimShader extends Shader {
                 workgroup_index * ${workgroupSize} +
                 local_invocation_index;
 
-            var p = particles[global_invocation_index];
 
-            let gridCoords = p.oldPosition / f32(globals.gridCellSizeInPixels);
+            let gridCoords = particles[global_invocation_index].oldPosition / f32(globals.gridCellSizeInPixels);
+
+            var collide = 0;
 
             for(var y = -1; y < 3; y++)
             {
@@ -170,11 +171,12 @@ export default class particleSimShader extends Shader {
 
                             let otherParticle = particles[particleIndex];
 
-                            let v = p.position - otherParticle.position;
+                            let v = particles[global_invocation_index].position - otherParticle.position;
                             let d = length(v);
 
                             if(d < globals.particleSize * 2){
-                                particles[global_invocation_index].color = vec2f(1,0);
+                                collide = 1;
+                                break;
                             }
                         }
 
@@ -183,6 +185,9 @@ export default class particleSimShader extends Shader {
                 }
             }
 
+            if(collide == 1){
+                particles[global_invocation_index].color = vec2f(1,0);
+            }
 
             //storageBarrier();
             
