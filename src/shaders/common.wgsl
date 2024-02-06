@@ -12,7 +12,7 @@ struct Particle {
 struct GlobalUniforms{
     canvasSize : vec2f,
     particleSize : f32,
-    gridCellSizeInPixels : u32
+    gridCellSizeInPixels : f32
 }
 
 @group(0) @binding(0) var<uniform> globals : GlobalUniforms;

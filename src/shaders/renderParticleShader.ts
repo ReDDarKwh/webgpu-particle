@@ -22,7 +22,7 @@ export default class renderParticleShader extends Shader{
             @vertex
             fn vertexMain(
             @builtin(vertex_index) vertexIndex : u32,
-            @builtin(instance_index) instance : u32
+    @builtin(instance_index) instance : u32
             ) -> VSOutput {
 
                 let vertices = array(

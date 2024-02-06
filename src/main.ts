@@ -6,7 +6,7 @@ import {
   makeShaderDataDefinitions,
   makeStructuredView,
   makeTypedArrayViews,
-  
+
 } from "webgpu-utils";
 import particleSimShader from "./shaders/particleSimShader";
 import renderParticleShader from "./shaders/renderParticleShader";
@@ -28,7 +28,7 @@ declare var WebGPURecorder : any;
 
 const PARTICLE_SIZE = 2;
 const WORKGROUP_SIZE = 64;
-const WORKGROUP_NUM = 16;
+const WORKGROUP_NUM = 16 * 4;
 const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
 
 const GRID_SIZE_IN_CELLS = [
@@ -101,13 +101,13 @@ const random = () => {
 
 for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   const angle = rand() * 2 * Math.PI;
-  
-  particleView.views[i].oldPosition.set([
-    context.canvas.width / 2,
-    context.canvas.height / 2,
-  ]);
-  
-  //particleView.views[i].oldPosition.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
+
+  // particleView.views[i].oldPosition.set([
+  //   context.canvas.width / 2,
+  //   context.canvas.height / 2,
+  // ]);
+
+  particleView.views[i].oldPosition.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
   const speed = PARTICLE_SPEED;
   particleView.views[i].velocity.set([
     Math.cos(angle) * speed,
@@ -452,7 +452,7 @@ function compute(encoder: GPUCommandEncoder, step: number) {
     pass.dispatchWorkgroups(WORKGROUP_NUM);
     pass.end();
   }
-  
+
 }
 
 function render(encoder: GPUCommandEncoder, step: number) {
@@ -478,8 +478,8 @@ async function setup() {
   <canvas id="render"></canvas>
   `;
 
-  const canvas = document.querySelector("#render");
-  const overlay = document.querySelector("#overlay");
+  const canvas = document.querySelector("#render") as HTMLCanvasElement;
+  const overlay = document.querySelector("#overlay") as HTMLCanvasElement;
 
   if (!canvas) {
     throw new Error("Yo! No canvas found.");
@@ -507,35 +507,35 @@ async function setup() {
   overlay.width = size;
   overlay.height = size;
 
- 
 
 
-function drawBoard(){
 
-    // Box width
-    var bw = size;
-    // Box height
-    var bh = size;
-    // Padding
-    var p = 0;
+  function drawBoard(){
 
-    var cs = size / GRID_SIZE_IN_CELLS[0];
+      // Box width
+      var bw = size;
+      // Box height
+      var bh = size;
+      // Padding
+      var p = 0;
 
-    let context = overlay.getContext("2d");
-    for (var x = 0; x <= bw; x += cs) {
-        context.moveTo(0.5 + x + p, p);
-        context.lineTo(0.5 + x + p, bh + p);
-    }
+      var cs = size / GRID_SIZE_IN_CELLS[0];
 
-    for (var x = 0; x <= bh; x += cs) {
-        context.moveTo(p, 0.5 + x + p);
-        context.lineTo(bw + p, 0.5 + x + p);
-    }
-    context.strokeStyle = "black";
-    context.stroke();
-}
+      let context = overlay.getContext("2d")!;
+      for (var x = 0; x <= bw; x += cs) {
+          context.moveTo(0.5 + x + p, p);
+          context.lineTo(0.5 + x + p, bh + p);
+      }
 
-drawBoard();
+      for (var x = 0; x <= bh; x += cs) {
+          context.moveTo(p, 0.5 + x + p);
+          context.lineTo(bw + p, 0.5 + x + p);
+      }
+      context.strokeStyle = "black";
+      context.stroke();
+  }
+
+//drawBoard();
 
   if (!context) {
     throw new Error("Yo! No Canvas GPU context found.");
