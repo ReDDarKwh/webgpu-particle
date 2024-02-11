@@ -6,13 +6,14 @@ struct Particle {
   velocity : vec2f,
   oldVelocity : vec2f,
   
-  color : vec2f
+  color : vec2f,
+  mass : f32,
 };
 
 struct GlobalUniforms{
     canvasSize : vec2f,
     particleSize : f32,
-    gridCellSizeInPixels : f32
+    gridCellSizeInPixels : vec2f
 }
 
 @group(0) @binding(0) var<uniform> globals : GlobalUniforms;

@@ -1,49 +1,38 @@
 import "./style.css";
-import stringTemplate from "./stringTemplate";
-import {
-  VariableDefinition,
-  getSizeAndAlignmentOfUnsizedArrayElement,
-  makeShaderDataDefinitions,
-  makeStructuredView,
-  makeTypedArrayViews,
-
-} from "webgpu-utils";
+import { makeStructuredView } from "webgpu-utils";
 import particleSimShader from "./shaders/particleSimShader";
 import renderParticleShader from "./shaders/renderParticleShader";
 import Shader from "./shaders/shader";
 import { GUI } from "dat.gui";
 import Stats from "stats.js";
 
-declare var WebGPURecorder : any;
+declare var WebGPURecorder: any;
 
-// new WebGPURecorder({
-//   "frames": 100,
-//   "export": "WebGPURecord",
-//   "width": 800,
-//   "height": 600,
-//   "removeUnusedResources": false
-// });
+const { device, canvasFormat, context, stats, overlayContext } = await setup();
 
+const CANVAS_HEIGHT = context.canvas.height;
+const CANVAS_WIDTH = context.canvas.width;
 
+const PARTICLE_SIZE = 3;
 
-const PARTICLE_SIZE = 2;
-const WORKGROUP_SIZE = 64;
-const WORKGROUP_NUM = 16 * 4;
+const DISPLAYED_PARTICLE_COUNT = 60*1000;
+
+const WORKGROUP_SIZE = 60;
+const WORKGROUP_NUM = Math.ceil(DISPLAYED_PARTICLE_COUNT / WORKGROUP_SIZE);
+
 const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
 
-const GRID_SIZE_IN_CELLS = [
-  Math.sqrt(PARTICLE_MAX_COUNT),
-  Math.sqrt(PARTICLE_MAX_COUNT),
-];
+const GRID_SIZE_IN_CELLS = GetGridSize({
+  particleCount: PARTICLE_MAX_COUNT,
+  canvasWidth: CANVAS_WIDTH,
+  canvasHeight: CANVAS_HEIGHT,
+});
 
-const { device, canvasFormat, context, stats } = await setup();
+//drawBoard(overlayContext, GRID_SIZE_IN_CELLS);
 
-const GRID_CELL_SIZE = context.canvas.width / GRID_SIZE_IN_CELLS[0];
-
-const PARTICLE_SPEED = 25;
-
-console.log(GRID_SIZE_IN_CELLS);
-console.log(GRID_CELL_SIZE);
+const GRID_CELL_SIZE_X = CANVAS_WIDTH / GRID_SIZE_IN_CELLS[0];
+const GRID_CELL_SIZE_Y = CANVAS_HEIGHT / GRID_SIZE_IN_CELLS[1];
+const PARTICLE_SPEED = 25 * 2;
 
 const particleComputeShader = new particleSimShader(
   WORKGROUP_SIZE,
@@ -62,8 +51,6 @@ const particleStorageUnitSize = particleComputeShader.structs["Particle"].size;
 console.log("ParticleStructSize : " + particleStorageUnitSize);
 
 const particleStorageSizeInBytes = particleStorageUnitSize * PARTICLE_MAX_COUNT;
-
-const gridStorageSizeInBytes = GRID_SIZE_IN_CELLS[0] * GRID_SIZE_IN_CELLS[1] * 4;
 
 //#region Create Buffers
 
@@ -87,7 +74,6 @@ const particleListsStorageBuffer = device.createBuffer({
 
 //#endregion
 
-
 const particleView = makeStructuredView(
   particleComputeShader.storages["particles"],
   new ArrayBuffer(PARTICLE_MAX_COUNT * particleStorageUnitSize)
@@ -95,9 +81,9 @@ const particleView = makeStructuredView(
 
 var seed = 1;
 const random = () => {
-    var x = Math.sin(seed++) * 10000;
-    return x - Math.floor(x);
-}
+  var x = Math.sin(seed++) * 10000;
+  return x - Math.floor(x);
+};
 
 for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   const angle = rand() * 2 * Math.PI;
@@ -107,7 +93,15 @@ for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   //   context.canvas.height / 2,
   // ]);
 
-  particleView.views[i].oldPosition.set([rand(0, context.canvas.width), rand(0, context.canvas.height)]);
+  
+  particleView.views[i].oldPosition.set([
+      rand(0, context.canvas.width),
+      rand(0, context.canvas.height),
+    ]);
+
+    
+  particleView.views[i].mass.set([rand(1,5)]);
+
   const speed = PARTICLE_SPEED;
   particleView.views[i].velocity.set([
     Math.cos(angle) * speed,
@@ -126,7 +120,7 @@ const { view: globalUniforms, buffer: globalUniformsBuffer } =
 globalUniforms.set({
   canvasSize: [context.canvas.width, context.canvas.height],
   particleSize: PARTICLE_SIZE,
-  gridCellSizeInPixels : GRID_CELL_SIZE
+  gridCellSizeInPixels: [GRID_CELL_SIZE_X, GRID_CELL_SIZE_Y],
 });
 
 device.queue.writeBuffer(globalUniformsBuffer, 0, globalUniforms.arrayBuffer);
@@ -141,21 +135,20 @@ grd.addColorStop(1, "rgba(255,255,255,0)");
 ctx.fillStyle = grd;
 ctx.fillRect(0, 0, 32, 32);
 
-// const texture = device.createTexture({
-//   size: [32, 32],
-//   format: "rgba8unorm",
-//   usage:
-//     GPUTextureUsage.TEXTURE_BINDING |
-//     GPUTextureUsage.COPY_DST |
-//     GPUTextureUsage.RENDER_ATTACHMENT,
-// });
+const texture = device.createTexture({
+  size: [32, 32],
+  format: "rgba8unorm",
+  usage:
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.COPY_DST |
+    GPUTextureUsage.RENDER_ATTACHMENT,
+});
 
-// device.queue.copyExternalImageToTexture(
-//   { source: ctx.canvas, flipY: true },
-//   { texture, premultipliedAlpha: true },
-//   [32, 32]
-// );
-
+device.queue.copyExternalImageToTexture(
+  { source: ctx.canvas, flipY: true },
+  { texture, premultipliedAlpha: true },
+  [32, 32]
+);
 
 const particleBindGroupLayout = device.createBindGroupLayout({
   entries: [
@@ -203,7 +196,7 @@ const computeBindGroupLayout = device.createBindGroupLayout({
       buffer: {
         type: "storage",
       },
-    }
+    },
   ],
 });
 
@@ -215,7 +208,7 @@ const simulationBindGroupLayout = device.createBindGroupLayout({
       buffer: {
         type: "uniform",
       },
-    }
+    },
   ],
 });
 
@@ -224,7 +217,7 @@ const resetPipeline = device.createComputePipeline({
     bindGroupLayouts: [
       commonBindGroupLayout,
       computeBindGroupLayout,
-      simulationBindGroupLayout
+      simulationBindGroupLayout,
     ],
   }),
   compute: {
@@ -238,7 +231,7 @@ const gridComputePipeline = device.createComputePipeline({
     bindGroupLayouts: [
       commonBindGroupLayout,
       computeBindGroupLayout,
-      simulationBindGroupLayout
+      simulationBindGroupLayout,
     ],
   }),
   compute: {
@@ -252,7 +245,7 @@ const computePipeline = device.createComputePipeline({
     bindGroupLayouts: [
       commonBindGroupLayout,
       computeBindGroupLayout,
-      simulationBindGroupLayout
+      simulationBindGroupLayout,
     ],
   }),
   compute: {
@@ -270,14 +263,13 @@ const renderBindGroupLayout = device.createBindGroupLayout({
         type: "filtering",
       },
     },
-    // {
-    //   binding: 1,
-    //   visibility: GPUShaderStage.FRAGMENT,
-    //   texture: {
-    //     sampleType: "float",
-    //   },
-    // },
-
+    {
+      binding: 1,
+      visibility: GPUShaderStage.FRAGMENT,
+      texture: {
+        sampleType: "float",
+      },
+    },
   ],
 });
 
@@ -328,7 +320,6 @@ const commonBindGroup = device.createBindGroup({
   ],
 });
 
-
 const simulationBindGroup = device.createBindGroup({
   label: "simulationBindGroup",
   layout: simulationBindGroupLayout,
@@ -336,7 +327,7 @@ const simulationBindGroup = device.createBindGroup({
     {
       binding: 0,
       resource: { buffer: simulationUniformsBuffer },
-    }
+    },
   ],
 });
 
@@ -355,7 +346,7 @@ const bindGroup0_c = device.createBindGroup({
     {
       binding: 2,
       resource: { buffer: particleListsStorageBuffer },
-    }
+    },
   ],
 });
 
@@ -382,19 +373,27 @@ const renderBindGroup = device.createBindGroup({
       binding: 0,
       resource: sampler,
     },
-    // {
-    //   binding: 1,
-    //   resource: texture.createView(),
-    // },
-
+    {
+      binding: 1,
+      resource: texture.createView(),
+    },
   ],
 });
+
+function hexToRgb(hex: string) {
+  var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? [
+    parseInt(result[1], 16) / 255,
+    parseInt(result[2], 16) / 255,
+    parseInt(result[3], 16) / 255
+  ] : [0,0,0];
+}
 
 const renderPassDescriptor = {
   label: "our basic canvas renderPass",
   colorAttachments: [
     {
-      clearValue: [0.3, 0.3, 0.3, 1],
+      clearValue: [...hexToRgb("#0454fb"), 1],
       loadOp: "clear",
       storeOp: "store",
     },
@@ -438,7 +437,6 @@ function update(time: number) {
 requestAnimationFrame(update);
 
 function compute(encoder: GPUCommandEncoder, step: number) {
-
   {
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, commonBindGroup);
@@ -452,7 +450,6 @@ function compute(encoder: GPUCommandEncoder, step: number) {
     pass.dispatchWorkgroups(WORKGROUP_NUM);
     pass.end();
   }
-
 }
 
 function render(encoder: GPUCommandEncoder, step: number) {
@@ -498,44 +495,13 @@ async function setup() {
 
   const context = canvas.getContext("webgpu");
 
+  canvas.width = appElement.clientWidth;
+  canvas.height = appElement.clientHeight;
 
-  const size = Math.min(appElement.clientWidth, appElement.clientHeight);
+  overlay.width = appElement.clientWidth;
+  overlay.height = appElement.clientHeight;
 
-  canvas.width = size;
-  canvas.height = size;
-
-  overlay.width = size;
-  overlay.height = size;
-
-
-
-
-  function drawBoard(){
-
-      // Box width
-      var bw = size;
-      // Box height
-      var bh = size;
-      // Padding
-      var p = 0;
-
-      var cs = size / GRID_SIZE_IN_CELLS[0];
-
-      let context = overlay.getContext("2d")!;
-      for (var x = 0; x <= bw; x += cs) {
-          context.moveTo(0.5 + x + p, p);
-          context.lineTo(0.5 + x + p, bh + p);
-      }
-
-      for (var x = 0; x <= bh; x += cs) {
-          context.moveTo(p, 0.5 + x + p);
-          context.lineTo(bw + p, 0.5 + x + p);
-      }
-      context.strokeStyle = "black";
-      context.stroke();
-  }
-
-//drawBoard();
+  const overlayContext = overlay.getContext("2d")!;
 
   if (!context) {
     throw new Error("Yo! No Canvas GPU context found.");
@@ -552,7 +518,7 @@ async function setup() {
   stats.showPanel(1); // 0: fps, 1: ms, 2: mb, 3+: custom
   document.body.appendChild(stats.dom);
 
-  return { device, canvasFormat, context, stats };
+  return { device, canvasFormat, context, overlayContext, stats };
 }
 
 function rand(min = 0, max = 1) {
@@ -570,4 +536,61 @@ function makeUniformViewAndBuffer(shader: Shader, structName: string) {
   };
 }
 
+function GetGridSize({
+  particleCount,
+  canvasWidth,
+  canvasHeight,
+}: {
+  particleCount: number;
+  canvasWidth: number;
+  canvasHeight: number;
+}): number[] {
+  const factors = (number: number) =>
+    [...Array(number + 1).keys()].filter((i) => number % i === 0);
 
+  const ratio = (w: number, h: number) => Math.max(w, h) / Math.min(w, h);
+
+  const cr = ratio(canvasWidth, canvasHeight);
+
+  const f = factors(particleCount);
+  const sf = f.slice(0, Math.ceil(f.length / 2));
+
+  const c = sf
+    .map((x, i) => [x, f[f.length - 1 - i]])
+    .reduce((a, b) =>
+      Math.abs(ratio(a[0], a[1]) - cr) < Math.abs(ratio(b[0], b[1]) - cr)
+        ? a
+        : b
+    );
+
+  return canvasWidth > canvasHeight
+    ? [Math.max(c[0], c[1]), Math.min(c[0], c[1])]
+    : [Math.min(c[0], c[1]), Math.max(c[0], c[1])];
+}
+
+function drawBoard(
+  overlayContext: CanvasRenderingContext2D,
+  gridSize: number[]
+) {
+  // Box width
+  var bw = overlayContext.canvas.width;
+  // Box height
+  var bh = overlayContext.canvas.height;
+  // Padding
+  var p = 0;
+
+  const cx = overlayContext.canvas.width / gridSize[0];
+  const cy = overlayContext.canvas.height / gridSize[1];
+
+  for (var x = 0; x <= bw; x += cx) {
+    overlayContext.moveTo(0.5 + x + p, p);
+    overlayContext.lineTo(0.5 + x + p, bh + p);
+  }
+
+  for (var x = 0; x <= bh; x += cy) {
+    overlayContext.moveTo(p, 0.5 + x + p);
+    overlayContext.lineTo(bw + p, 0.5 + x + p);
+  }
+  overlayContext.strokeStyle = "black";
+  overlayContext.stroke();
+}

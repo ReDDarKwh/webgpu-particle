@@ -41,18 +41,18 @@ export default class renderParticleShader extends Shader{
                 vsOut.position = vec4f(pos, 0.0, 1.0);
                 vsOut.texcoord = vertexPosition * 0.5 + 0.5;
 
-                vsOut.color = vec3f(particles[instance].color.x,particles[instance].color.y, 0);
+                vsOut.color = vec3f(particles[instance].color.xy, 1);
 
                 return vsOut;
             }
             
             @group(2) @binding(0) var s: sampler;
-            //@group(2) @binding(1) var t: texture_2d<f32>;
+            @group(2) @binding(1) var t: texture_2d<f32>;
 
             @fragment
             fn fragmentMain(vsOut: VSOutput) -> @location(0) vec4f {
 
-                let color = vec4f(vsOut.color,1);
+                let color = textureSample(t, s, vsOut.texcoord) * vec4f(0,1,1,1);
                 return color;
             }
         `, label, device);

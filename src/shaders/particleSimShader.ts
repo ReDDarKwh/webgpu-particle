@@ -16,9 +16,9 @@ export default class particleSimShader extends Shader {
             
         ${common}
 
-        const gridSize = vec2u(${(gridSize[0], gridSize[1])});
+        const gridSize = vec2u(${gridSize[0]}, ${gridSize[1]});
 
-        const gridSizeI = vec2i(${(gridSize[0], gridSize[1])});
+        const gridSizeI = vec2i(${gridSize[0]}, ${gridSize[1]});
 
         struct SimulationUniforms{
             deltaTime: f32
@@ -77,7 +77,12 @@ export default class particleSimShader extends Shader {
 
             atomicStore(&particleHeads[global_invocation_index], -1);
 
-            particles[global_invocation_index].position = particles[global_invocation_index].oldPosition;
+
+            var p = particles[global_invocation_index];
+
+            p.oldVelocity = p.velocity; 
+
+            particles[global_invocation_index] = p;
         }
         
         @compute @workgroup_size(${workgroupSize}) fn c0(
@@ -100,9 +105,6 @@ export default class particleSimShader extends Shader {
             var nextPos = p.oldPosition + p.velocity * simulation.deltaTime;
             
             var screenWarpVec = vec2f(0,0);
-            
-
-            let particleSizeTimes2 = globals.gridCellSizeInPixels;
 
             if(nextPos.x > globals.canvasSize.x){
                 screenWarpVec += vec2f(-globals.canvasSize.x, 0);
@@ -145,7 +147,7 @@ export default class particleSimShader extends Shader {
                 local_invocation_index;
 
 
-            let gridCoords = vec2i(particles[global_invocation_index].oldPosition / globals.gridCellSizeInPixels);
+            let gridCoords = vec2i(particles[global_invocation_index].position / globals.gridCellSizeInPixels);
 
             var collide = 0;
 
@@ -160,6 +162,7 @@ export default class particleSimShader extends Shader {
                         gridCoordsWithOffset.y < 0 || 
                         gridCoordsWithOffset.y > gridSizeI.y - 1)
                     {
+                        //particles[global_invocation_index].color = vec2f(1,0);
                         continue;
                     }
 
@@ -171,12 +174,26 @@ export default class particleSimShader extends Shader {
                         
                         if(particleIndex != i32(global_invocation_index)){
 
-                            let otherParticle = particles[particleIndex];
+                            let o = particles[particleIndex];
+                            let p = particles[global_invocation_index];
 
-                            let v = particles[global_invocation_index].position - otherParticle.position;
-                            let d = length(v);
+                            let d = p.position - o.position;
+                            let l = length(d);
+                            
+                            let r2 = globals.particleSize * 2 - 2;
 
-                            if(d < globals.particleSize * 2){
+                            if(l < r2){
+
+                                let overlap = r2 - l;
+
+                                particles[global_invocation_index].oldPosition += d/l * overlap;
+
+                                let v = (p.mass - o.mass)/(p.mass + o.mass) * p.velocity + 
+                                        2 * o.mass / (p.mass + o.mass) * o.oldVelocity;
+                                
+                                particles[global_invocation_index].velocity = o.oldVelocity;
+                                
+                                
                                 collide = 1;
                                 break;
                             }
@@ -184,6 +201,13 @@ export default class particleSimShader extends Shader {
 
                         particleIndex = particleLists[particleIndex];
                     }
+
+                    if(collide == 1){
+                        break;
+                    }
+                }
+                if(collide == 1){
+                    break;
                 }
             }
 
@@ -196,6 +220,7 @@ export default class particleSimShader extends Shader {
             //     random(vec2f(1f / f32(gridSize.x) * f32(gridCoords.x),0)), 
             //     random(vec2f(1f / f32(gridSize.y) * f32(gridCoords.y),0))
             //     );
+
 
             
         } 

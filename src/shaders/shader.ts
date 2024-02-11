@@ -42,6 +42,8 @@ export default abstract class Shader{
             label,
             code
         });
+
+        console.log(code);
     }
 
 }
