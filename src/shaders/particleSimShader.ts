@@ -30,33 +30,29 @@ export default class particleSimShader extends Shader {
         
         @group(2) @binding(0) var<uniform> simulation : SimulationUniforms;
 
-        fn wrap(vp : f32, mp : f32) -> f32 { 
-            
-            var v = vp;
-            var m = mp;
-
-            if (m > 0) {
-              if (v < 0) {v = m-((-v) % m);}          // get negative v into region [0, m)
-            } else {
-              m = -m;                               // the positive value is easier to work with
-              if (v < 0) {v += m * f32(1 + i32(-v/m));}  // add m enough times so v > 0
-              v =  m - (v % m);                     // get v % m, then flip 
-            }
-            return v % m;                           // return v % m, now that both are positive
-        }
-
         fn getIndexFromGridPos(gridPos : vec2u) -> u32{
 
             return gridPos.x + gridPos.y * gridSize.x;
         }
 
-        fn collideParticles(particle: ptr<function, Particle>, otherParticle: Particle){
+        fn applyCollision(
+            global_invocation_index: u32
+        ){
+            var p = particles[global_invocation_index];
 
-            let v = (*particle).position - otherParticle.position;
-            let d = length(v);
+            if(p.collisionOtherIndex != -1){
 
-            if(d < globals.particleSize * 2){
-                (*particle).color = vec2f(1,0);
+                let o = particles[p.collisionOtherIndex];
+
+                if(o.collisionOtherIndex == i32(global_invocation_index)){
+
+                    let v = (p.mass - o.mass)/(p.mass + o.mass) * p.oldVelocity + 
+                            2 * o.mass / (p.mass + o.mass) * o.oldVelocity;
+                    
+                    p.velocity = v;
+                    p.temp = min(1, p.temp + 0.06);
+                    particles[global_invocation_index] = p;
+                }
             }
         }
 
@@ -77,11 +73,8 @@ export default class particleSimShader extends Shader {
 
             atomicStore(&particleHeads[global_invocation_index], -1);
 
-
             var p = particles[global_invocation_index];
-
-            p.oldVelocity = p.velocity; 
-
+            p.temp = max(0.1, p.temp - 0.2 * simulation.deltaTime);
             particles[global_invocation_index] = p;
         }
         
@@ -100,35 +93,43 @@ export default class particleSimShader extends Shader {
                 workgroup_index * ${workgroupSize} +
                 local_invocation_index;
 
+            applyCollision(global_invocation_index);
+
             var p = particles[global_invocation_index];
 
-            var nextPos = p.oldPosition + p.velocity * simulation.deltaTime;
+            var velocity = p.velocity;
+            var nextPos = p.oldPosition + velocity * simulation.deltaTime;
             
-            var screenWarpVec = vec2f(0,0);
-
+            var screenBounceX : f32 = 1;
+            var screenBounceY : f32 = 1;
+            
             if(nextPos.x > globals.canvasSize.x){
-                screenWarpVec += vec2f(-globals.canvasSize.x, 0);
+                screenBounceX = -1;
             } else if (nextPos.x < 0) {
-                screenWarpVec += vec2f(globals.canvasSize.x, 0);
+                screenBounceX = -1;
             }
             
             if(nextPos.y > globals.canvasSize.y){
-                screenWarpVec = vec2f(0, -globals.canvasSize.y);
+                screenBounceY = -1;
             } else if (nextPos.y < 0) {
-                screenWarpVec = vec2f(0, globals.canvasSize.y);
+                screenBounceY = -1;
             }
 
-            nextPos += screenWarpVec;
+            velocity *= vec2f(screenBounceX, screenBounceY);
 
-            particles[global_invocation_index].position = nextPos;
-            particles[global_invocation_index].oldPosition = nextPos;
+            nextPos = p.oldPosition + velocity * simulation.deltaTime;
+
+            p.velocity = velocity;
+
+            p.position = nextPos;
+            p.oldPosition = nextPos;
             
             let gridCoords = vec2u(nextPos / globals.gridCellSizeInPixels);
             let gridId = getIndexFromGridPos(gridCoords);
             
             particleLists[global_invocation_index] = atomicExchange(&particleHeads[gridId], i32(global_invocation_index));
 
-            particles[global_invocation_index].color = vec2f(0,1);
+            particles[global_invocation_index] = p;
         }
 
         @compute @workgroup_size(${workgroupSize}) fn c1(
@@ -146,10 +147,11 @@ export default class particleSimShader extends Shader {
                 workgroup_index * ${workgroupSize} +
                 local_invocation_index;
 
+            var p = particles[global_invocation_index];
+            p.collisionOtherIndex = -1;
+            p.oldVelocity = p.velocity;
 
-            let gridCoords = vec2i(particles[global_invocation_index].position / globals.gridCellSizeInPixels);
-
-            var collide = 0;
+            let gridCoords = vec2i(p.position / globals.gridCellSizeInPixels);
 
             for(var y = -1; y < 2; y++)
             {
@@ -162,7 +164,6 @@ export default class particleSimShader extends Shader {
                         gridCoordsWithOffset.y < 0 || 
                         gridCoordsWithOffset.y > gridSizeI.y - 1)
                     {
-                        //particles[global_invocation_index].color = vec2f(1,0);
                         continue;
                     }
 
@@ -175,55 +176,34 @@ export default class particleSimShader extends Shader {
                         if(particleIndex != i32(global_invocation_index)){
 
                             let o = particles[particleIndex];
-                            let p = particles[global_invocation_index];
-
                             let d = p.position - o.position;
                             let l = length(d);
-                            
-                            let r2 = globals.particleSize * 2 - 2;
+                            let r2 = globals.particleSize;
 
                             if(l < r2){
 
                                 let overlap = r2 - l;
+                                p.oldPosition += d/l * overlap;
 
-                                particles[global_invocation_index].oldPosition += d/l * overlap;
-
-                                let v = (p.mass - o.mass)/(p.mass + o.mass) * p.velocity + 
-                                        2 * o.mass / (p.mass + o.mass) * o.oldVelocity;
-                                
-                                particles[global_invocation_index].velocity = o.oldVelocity;
-                                
-                                
-                                collide = 1;
+                                p.collisionOtherIndex = particleIndex;
                                 break;
                             }
                         }
 
                         particleIndex = particleLists[particleIndex];
                     }
-
-                    if(collide == 1){
+                    if(p.collisionOtherIndex != -1){
                         break;
                     }
                 }
-                if(collide == 1){
+                if(p.collisionOtherIndex != -1){
                     break;
                 }
             }
 
-            if(collide == 1){
-                particles[global_invocation_index].color = vec2f(1,0);
-            }
-
-
-            // particles[global_invocation_index].color = vec2f( 
-            //     random(vec2f(1f / f32(gridSize.x) * f32(gridCoords.x),0)), 
-            //     random(vec2f(1f / f32(gridSize.y) * f32(gridCoords.y),0))
-            //     );
-
-
-            
+            particles[global_invocation_index] = p;
         } 
+
         `,
       label,
       device

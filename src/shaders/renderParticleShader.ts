@@ -35,13 +35,16 @@ export default class renderParticleShader extends Shader{
                 );
 
                 let vertexPosition = vertices[vertexIndex];
-                let pos = (vertexPosition * globals.particleSize + particles[instance].position) / globals.canvasSize * 2 - 1;
+                let pos = (vertexPosition * globals.particleSize*3 + particles[instance].position) / globals.canvasSize * 2 - 1;
 
                 var vsOut: VSOutput;
                 vsOut.position = vec4f(pos, 0.0, 1.0);
                 vsOut.texcoord = vertexPosition * 0.5 + 0.5;
 
-                vsOut.color = vec3f(particles[instance].color.xy, 1);
+                let color1 =  vec3f(1, 0, 1);
+                let color2 = vec3f(0, 0, 0);
+
+                vsOut.color = mix(color1, color2, 1 - particles[instance].temp);
 
                 return vsOut;
             }
@@ -52,7 +55,7 @@ export default class renderParticleShader extends Shader{
             @fragment
             fn fragmentMain(vsOut: VSOutput) -> @location(0) vec4f {
 
-                let color = textureSample(t, s, vsOut.texcoord) * vec4f(0,1,1,1);
+                let color = textureSample(t, s, vsOut.texcoord) * vec4f(vsOut.color,1);
                 return color;
             }
         `, label, device);

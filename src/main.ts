@@ -13,9 +13,9 @@ const { device, canvasFormat, context, stats, overlayContext } = await setup();
 const CANVAS_HEIGHT = context.canvas.height;
 const CANVAS_WIDTH = context.canvas.width;
 
-const PARTICLE_SIZE = 3;
+const PARTICLE_SIZE = 1;
 
-const DISPLAYED_PARTICLE_COUNT = 60*1000;
+const DISPLAYED_PARTICLE_COUNT = 60*3000;
 
 const WORKGROUP_SIZE = 60;
 const WORKGROUP_NUM = Math.ceil(DISPLAYED_PARTICLE_COUNT / WORKGROUP_SIZE);
@@ -32,7 +32,9 @@ const GRID_SIZE_IN_CELLS = GetGridSize({
 
 const GRID_CELL_SIZE_X = CANVAS_WIDTH / GRID_SIZE_IN_CELLS[0];
 const GRID_CELL_SIZE_Y = CANVAS_HEIGHT / GRID_SIZE_IN_CELLS[1];
-const PARTICLE_SPEED = 25 * 2;
+console.log(GRID_CELL_SIZE_X, GRID_CELL_SIZE_Y);
+
+const PARTICLE_SPEED = 4;
 
 const particleComputeShader = new particleSimShader(
   WORKGROUP_SIZE,
@@ -81,9 +83,16 @@ const particleView = makeStructuredView(
 
 var seed = 1;
 const random = () => {
-  var x = Math.sin(seed++) * 10000;
+  var x = Math.sin(seed++) * 100000;
   return x - Math.floor(x);
 };
+
+function shuffle(array : any[]){
+
+  return array.map(value => ({ value, sort: Math.random() }))
+  .sort((a, b) => a.sort - b.sort)
+  .map(({ value }) => value)
+}
 
 for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   const angle = rand() * 2 * Math.PI;
@@ -93,14 +102,13 @@ for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
   //   context.canvas.height / 2,
   // ]);
 
-  
   particleView.views[i].oldPosition.set([
-      rand(0, context.canvas.width),
-      rand(0, context.canvas.height),
-    ]);
-
-    
-  particleView.views[i].mass.set([rand(1,5)]);
+    rand(0, context.canvas.width),
+    rand(0, context.canvas.height),
+  ]);
+  
+  particleView.views[i].mass.set([rand(1, 10)]);
+  particleView.views[i].collisionOtherIndex.set([-1]);
 
   const speed = PARTICLE_SPEED;
   particleView.views[i].velocity.set([
@@ -127,7 +135,7 @@ device.queue.writeBuffer(globalUniformsBuffer, 0, globalUniforms.arrayBuffer);
 
 const ctx = new OffscreenCanvas(32, 32).getContext("2d")!;
 
-const grd = ctx.createRadialGradient(16, 16, 7, 16, 16, 16);
+const grd = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
 grd.addColorStop(0, "rgba(255,255,255,255)");
 grd.addColorStop(1, "rgba(255,255,255,0)");
 
@@ -253,6 +261,21 @@ const computePipeline = device.createComputePipeline({
     entryPoint: "c1",
   },
 });
+
+// const collisionComputePipeline = device.createComputePipeline({
+//   layout: device.createPipelineLayout({
+//     bindGroupLayouts: [
+//       commonBindGroupLayout,
+//       computeBindGroupLayout,
+//       simulationBindGroupLayout,
+//     ],
+//   }),
+//   compute: {
+//     module: particleComputeShader.module,
+//     entryPoint: "c2",
+//   },
+// });
+
 
 const renderBindGroupLayout = device.createBindGroupLayout({
   entries: [
@@ -393,7 +416,7 @@ const renderPassDescriptor = {
   label: "our basic canvas renderPass",
   colorAttachments: [
     {
-      clearValue: [...hexToRgb("#0454fb"), 1],
+      clearValue: [...hexToRgb("#000000"), 1],
       loadOp: "clear",
       storeOp: "store",
     },
