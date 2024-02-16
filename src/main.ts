@@ -8,329 +8,52 @@ import Stats from "stats.js";
 
 declare var WebGPURecorder: any;
 
-const { device, canvasFormat, context, stats, overlayContext } = await setup();
-
-const CANVAS_HEIGHT = context.canvas.height;
-const CANVAS_WIDTH = context.canvas.width;
+const { device, canvasFormat, context, stats, overlayContext, settings } =
+  await setup();
 
 const PARTICLE_SIZE = 1;
-
-const DISPLAYED_PARTICLE_COUNT = 60*3000;
-
 const WORKGROUP_SIZE = 60;
-const WORKGROUP_NUM = Math.ceil(DISPLAYED_PARTICLE_COUNT / WORKGROUP_SIZE);
-
-const PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
-
-const GRID_SIZE_IN_CELLS = GetGridSize({
-  particleCount: PARTICLE_MAX_COUNT,
-  canvasWidth: CANVAS_WIDTH,
-  canvasHeight: CANVAS_HEIGHT,
-});
-
-//drawBoard(overlayContext, GRID_SIZE_IN_CELLS);
-
-const GRID_CELL_SIZE_X = CANVAS_WIDTH / GRID_SIZE_IN_CELLS[0];
-const GRID_CELL_SIZE_Y = CANVAS_HEIGHT / GRID_SIZE_IN_CELLS[1];
-console.log(GRID_CELL_SIZE_X, GRID_CELL_SIZE_Y);
-
-const PARTICLE_SPEED = 4;
+const PARTICLE_SPEED = 10;
+let WORKGROUP_NUM: number;
+let PARTICLE_MAX_COUNT: number;
 
 const particleComputeShader = new particleSimShader(
   WORKGROUP_SIZE,
   "Compute shader",
-  device,
-  GRID_SIZE_IN_CELLS
+  device
 );
 const particleRenderShader = new renderParticleShader(
   "Particle shader",
-  device,
-  GRID_SIZE_IN_CELLS
+  device
 );
-
-const particleStorageUnitSize = particleComputeShader.structs["Particle"].size;
-
-console.log("ParticleStructSize : " + particleStorageUnitSize);
-
-const particleStorageSizeInBytes = particleStorageUnitSize * PARTICLE_MAX_COUNT;
 
 //#region Create Buffers
-
-const particleStorageBuffer = device.createBuffer({
-  label: "Particle storage buffer",
-  size: particleStorageSizeInBytes,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
-const particleHeadsStorageBuffer = device.createBuffer({
-  label: "Particle heads storage buffer",
-  size: PARTICLE_MAX_COUNT * 4,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
-const particleListsStorageBuffer = device.createBuffer({
-  label: "Particle lists storage buffer",
-  size: PARTICLE_MAX_COUNT * 4,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
-//#endregion
-
-const particleView = makeStructuredView(
-  particleComputeShader.storages["particles"],
-  new ArrayBuffer(PARTICLE_MAX_COUNT * particleStorageUnitSize)
-);
-
-var seed = 1;
-const random = () => {
-  var x = Math.sin(seed++) * 100000;
-  return x - Math.floor(x);
-};
-
-function shuffle(array : any[]){
-
-  return array.map(value => ({ value, sort: Math.random() }))
-  .sort((a, b) => a.sort - b.sort)
-  .map(({ value }) => value)
-}
-
-for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
-  const angle = rand() * 2 * Math.PI;
-
-  // particleView.views[i].oldPosition.set([
-  //   context.canvas.width / 2,
-  //   context.canvas.height / 2,
-  // ]);
-
-  particleView.views[i].oldPosition.set([
-    rand(0, context.canvas.width),
-    rand(0, context.canvas.height),
-  ]);
-  
-  particleView.views[i].mass.set([rand(1, 10)]);
-  particleView.views[i].collisionOtherIndex.set([-1]);
-
-  const speed = PARTICLE_SPEED;
-  particleView.views[i].velocity.set([
-    Math.cos(angle) * speed,
-    Math.sin(angle) * speed,
-  ]);
-}
-
-device.queue.writeBuffer(particleStorageBuffer, 0, particleView.arrayBuffer);
 
 const { view: simulationUniforms, buffer: simulationUniformsBuffer } =
   makeUniformViewAndBuffer(particleComputeShader, "SimulationUniforms");
 
+const { view: staticSimulationUniforms, buffer: staticSimulationUniformsBuffer } =
+makeUniformViewAndBuffer(particleComputeShader, "StaticSimulationUniforms");
+
 const { view: globalUniforms, buffer: globalUniformsBuffer } =
   makeUniformViewAndBuffer(particleComputeShader, "GlobalUniforms");
 
-globalUniforms.set({
-  canvasSize: [context.canvas.width, context.canvas.height],
-  particleSize: PARTICLE_SIZE,
-  gridCellSizeInPixels: [GRID_CELL_SIZE_X, GRID_CELL_SIZE_Y],
-});
+const { view: renderUniforms, buffer: renderUniformsBuffer } =
+  makeUniformViewAndBuffer(particleRenderShader, "RenderUniforms");
 
-device.queue.writeBuffer(globalUniformsBuffer, 0, globalUniforms.arrayBuffer);
+const texture = createParticleTexture();
+const layouts = createLayouts();
 
-const ctx = new OffscreenCanvas(32, 32).getContext("2d")!;
+const {
+  commonBindGroupLayout,
+  computeBindGroupLayout,
+  simulationBindGroupLayout,
+  particleBindGroupLayout,
+  renderBindGroupLayout,
+} = layouts;
 
-const grd = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-grd.addColorStop(0, "rgba(255,255,255,255)");
-grd.addColorStop(1, "rgba(255,255,255,0)");
-
-// Draw a filled Rectangle
-ctx.fillStyle = grd;
-ctx.fillRect(0, 0, 32, 32);
-
-const texture = device.createTexture({
-  size: [32, 32],
-  format: "rgba8unorm",
-  usage:
-    GPUTextureUsage.TEXTURE_BINDING |
-    GPUTextureUsage.COPY_DST |
-    GPUTextureUsage.RENDER_ATTACHMENT,
-});
-
-device.queue.copyExternalImageToTexture(
-  { source: ctx.canvas, flipY: true },
-  { texture, premultipliedAlpha: true },
-  [32, 32]
-);
-
-const particleBindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding: 0,
-      visibility: GPUShaderStage.VERTEX,
-      buffer: {
-        type: "read-only-storage",
-      },
-    },
-  ],
-});
-
-const commonBindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding: 0,
-      visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
-      buffer: {
-        type: "uniform",
-      },
-    },
-  ],
-});
-
-const computeBindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding: 0,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: {
-        type: "storage",
-      },
-    },
-    {
-      binding: 1,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: {
-        type: "storage",
-      },
-    },
-    {
-      binding: 2,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: {
-        type: "storage",
-      },
-    },
-  ],
-});
-
-const simulationBindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding: 0,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: {
-        type: "uniform",
-      },
-    },
-  ],
-});
-
-const resetPipeline = device.createComputePipeline({
-  layout: device.createPipelineLayout({
-    bindGroupLayouts: [
-      commonBindGroupLayout,
-      computeBindGroupLayout,
-      simulationBindGroupLayout,
-    ],
-  }),
-  compute: {
-    module: particleComputeShader.module,
-    entryPoint: "reset",
-  },
-});
-
-const gridComputePipeline = device.createComputePipeline({
-  layout: device.createPipelineLayout({
-    bindGroupLayouts: [
-      commonBindGroupLayout,
-      computeBindGroupLayout,
-      simulationBindGroupLayout,
-    ],
-  }),
-  compute: {
-    module: particleComputeShader.module,
-    entryPoint: "c0",
-  },
-});
-
-const computePipeline = device.createComputePipeline({
-  layout: device.createPipelineLayout({
-    bindGroupLayouts: [
-      commonBindGroupLayout,
-      computeBindGroupLayout,
-      simulationBindGroupLayout,
-    ],
-  }),
-  compute: {
-    module: particleComputeShader.module,
-    entryPoint: "c1",
-  },
-});
-
-// const collisionComputePipeline = device.createComputePipeline({
-//   layout: device.createPipelineLayout({
-//     bindGroupLayouts: [
-//       commonBindGroupLayout,
-//       computeBindGroupLayout,
-//       simulationBindGroupLayout,
-//     ],
-//   }),
-//   compute: {
-//     module: particleComputeShader.module,
-//     entryPoint: "c2",
-//   },
-// });
-
-
-const renderBindGroupLayout = device.createBindGroupLayout({
-  entries: [
-    {
-      binding: 0,
-      visibility: GPUShaderStage.FRAGMENT,
-      sampler: {
-        type: "filtering",
-      },
-    },
-    {
-      binding: 1,
-      visibility: GPUShaderStage.FRAGMENT,
-      texture: {
-        sampleType: "float",
-      },
-    },
-  ],
-});
-
-const renderPipeline = device.createRenderPipeline({
-  label: "Particle render pipeline",
-  layout: device.createPipelineLayout({
-    bindGroupLayouts: [
-      commonBindGroupLayout,
-      particleBindGroupLayout,
-      renderBindGroupLayout,
-    ],
-  }),
-  vertex: {
-    module: particleRenderShader.module,
-    entryPoint: "vertexMain",
-  },
-  fragment: {
-    module: particleRenderShader.module,
-    entryPoint: "fragmentMain",
-    targets: [
-      {
-        format: canvasFormat,
-        blend: {
-          color: {
-            srcFactor: "one",
-            dstFactor: "one-minus-src-alpha",
-            operation: "add",
-          },
-          alpha: {
-            srcFactor: "one",
-            dstFactor: "one-minus-src-alpha",
-            operation: "add",
-          },
-        },
-      },
-    ],
-  },
-});
+const { resetPipeline, gridComputePipeline, computePipeline, renderPipeline } =
+  createPipelines(layouts);
 
 const commonBindGroup = device.createBindGroup({
   label: "Common bind group",
@@ -351,38 +74,20 @@ const simulationBindGroup = device.createBindGroup({
       binding: 0,
       resource: { buffer: simulationUniformsBuffer },
     },
-  ],
-});
-
-const bindGroup0_c = device.createBindGroup({
-  label: "bindGroup0_c",
-  layout: computeBindGroupLayout,
-  entries: [
-    {
-      binding: 0,
-      resource: { buffer: particleStorageBuffer },
-    },
     {
       binding: 1,
-      resource: { buffer: particleHeadsStorageBuffer },
-    },
-    {
-      binding: 2,
-      resource: { buffer: particleListsStorageBuffer },
+      resource: { buffer: staticSimulationUniformsBuffer },
     },
   ],
 });
 
-const bindGroup0 = device.createBindGroup({
-  label: "bindGroup0",
-  layout: particleBindGroupLayout,
-  entries: [
-    {
-      binding: 0,
-      resource: { buffer: particleStorageBuffer },
-    },
-  ],
-});
+let bindGroups: {
+  bindGroup0_c: GPUBindGroup | null;
+  bindGroup0: GPUBindGroup | null;
+} = {
+  bindGroup0: null,
+  bindGroup0_c: null,
+};
 
 const sampler = device.createSampler({
   minFilter: "linear",
@@ -400,17 +105,12 @@ const renderBindGroup = device.createBindGroup({
       binding: 1,
       resource: texture.createView(),
     },
+    {
+      binding: 2,
+      resource: { buffer: renderUniformsBuffer },
+    },
   ],
 });
-
-function hexToRgb(hex: string) {
-  var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? [
-    parseInt(result[1], 16) / 255,
-    parseInt(result[2], 16) / 255,
-    parseInt(result[3], 16) / 255
-  ] : [0,0,0];
-}
 
 const renderPassDescriptor = {
   label: "our basic canvas renderPass",
@@ -422,6 +122,9 @@ const renderPassDescriptor = {
     },
   ],
 };
+
+updateParticleCount();
+updateRenderUniforms();
 
 let step = 0;
 let oldTime = 0;
@@ -463,7 +166,7 @@ function compute(encoder: GPUCommandEncoder, step: number) {
   {
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, commonBindGroup);
-    pass.setBindGroup(1, bindGroup0_c);
+    pass.setBindGroup(1, bindGroups.bindGroup0_c);
     pass.setBindGroup(2, simulationBindGroup);
     pass.setPipeline(resetPipeline);
     pass.dispatchWorkgroups(WORKGROUP_NUM);
@@ -479,16 +182,367 @@ function render(encoder: GPUCommandEncoder, step: number) {
   const canvasTexture = context.getCurrentTexture();
   (renderPassDescriptor.colorAttachments[0] as any).view =
     canvasTexture.createView();
+  
+  (renderPassDescriptor.colorAttachments[0] as any).clearValue = [...hexToRgb(settings.backgroundColor), 1];
 
   const pass = encoder.beginRenderPass(
     renderPassDescriptor as GPURenderPassDescriptor
   );
   pass.setPipeline(renderPipeline);
   pass.setBindGroup(0, commonBindGroup);
-  pass.setBindGroup(1, bindGroup0);
+  pass.setBindGroup(1, bindGroups.bindGroup0);
   pass.setBindGroup(2, renderBindGroup);
   pass.draw(6, PARTICLE_MAX_COUNT); // 6 vertices
   pass.end();
+}
+
+function createPipelines({
+  commonBindGroupLayout,
+  computeBindGroupLayout,
+  simulationBindGroupLayout,
+  particleBindGroupLayout,
+  renderBindGroupLayout,
+}: {
+  commonBindGroupLayout: GPUBindGroupLayout;
+  computeBindGroupLayout: GPUBindGroupLayout;
+  simulationBindGroupLayout: GPUBindGroupLayout;
+  particleBindGroupLayout: GPUBindGroupLayout;
+  renderBindGroupLayout: GPUBindGroupLayout;
+}) {
+  const resetPipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [
+        commonBindGroupLayout,
+        computeBindGroupLayout,
+        simulationBindGroupLayout,
+      ],
+    }),
+    compute: {
+      module: particleComputeShader.module,
+      entryPoint: "reset",
+    },
+  });
+
+  const gridComputePipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [
+        commonBindGroupLayout,
+        computeBindGroupLayout,
+        simulationBindGroupLayout,
+      ],
+    }),
+    compute: {
+      module: particleComputeShader.module,
+      entryPoint: "c0",
+    },
+  });
+
+  const computePipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [
+        commonBindGroupLayout,
+        computeBindGroupLayout,
+        simulationBindGroupLayout,
+      ],
+    }),
+    compute: {
+      module: particleComputeShader.module,
+      entryPoint: "c1",
+    },
+  });
+
+  const renderPipeline = device.createRenderPipeline({
+    label: "Particle render pipeline",
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [
+        commonBindGroupLayout,
+        particleBindGroupLayout,
+        renderBindGroupLayout,
+      ],
+    }),
+    vertex: {
+      module: particleRenderShader.module,
+      entryPoint: "vertexMain",
+    },
+    fragment: {
+      module: particleRenderShader.module,
+      entryPoint: "fragmentMain",
+      targets: [
+        {
+          format: canvasFormat,
+          blend: {
+            color: {
+              srcFactor: "one",
+              dstFactor: "one-minus-src-alpha",
+              operation: "add",
+            },
+            alpha: {
+              srcFactor: "one",
+              dstFactor: "one-minus-src-alpha",
+              operation: "add",
+            },
+          },
+        },
+      ],
+    },
+  });
+  return {
+    resetPipeline,
+    gridComputePipeline,
+    computePipeline,
+    renderPipeline,
+  };
+}
+
+function createLayouts() {
+  const particleBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {
+          type: "read-only-storage",
+        },
+      },
+    ],
+  });
+
+  const commonBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE | GPUShaderStage.VERTEX,
+        buffer: {
+          type: "uniform",
+        },
+      },
+    ],
+  });
+
+  const computeBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: "storage",
+        },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: "storage",
+        },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: "storage",
+        },
+      },
+    ],
+  });
+
+  const simulationBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: "uniform",
+        },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: "uniform",
+        },
+      },
+    ],
+  });
+
+  const renderBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.FRAGMENT,
+        sampler: {
+          type: "filtering",
+        },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: {
+          sampleType: "float",
+        },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {
+          type: "uniform",
+        },
+      },
+    ],
+  });
+
+  return {
+    commonBindGroupLayout,
+    computeBindGroupLayout,
+    simulationBindGroupLayout,
+    particleBindGroupLayout,
+    renderBindGroupLayout,
+  };
+}
+
+function createParticleTexture() {
+  const ctx = new OffscreenCanvas(32, 32).getContext("2d")!;
+
+  const grd = ctx.createRadialGradient(16, 16, 15, 16, 16, 16);
+  grd.addColorStop(0, "rgba(255,255,255,255)");
+  grd.addColorStop(1, "rgba(255,255,255,0)");
+
+  // Draw a filled Rectangle
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, 32, 32);
+
+  const texture = device.createTexture({
+    size: [32, 32],
+    format: "rgba8unorm",
+    usage:
+      GPUTextureUsage.TEXTURE_BINDING |
+      GPUTextureUsage.COPY_DST |
+      GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+
+  device.queue.copyExternalImageToTexture(
+    { source: ctx.canvas, flipY: true },
+    { texture, premultipliedAlpha: true },
+    [32, 32]
+  );
+  return texture;
+}
+
+function updateParticleCount() {
+  WORKGROUP_NUM = Math.ceil(settings.particleCount / WORKGROUP_SIZE);
+
+  PARTICLE_MAX_COUNT = WORKGROUP_SIZE * WORKGROUP_NUM;
+
+  const GRID_SIZE_IN_CELLS = GetGridSize({
+    particleCount: PARTICLE_MAX_COUNT,
+    canvasWidth: context.canvas.width,
+    canvasHeight: context.canvas.height,
+  });
+
+  const GRID_CELL_SIZE_X = context.canvas.width / GRID_SIZE_IN_CELLS[0];
+  const GRID_CELL_SIZE_Y = context.canvas.height / GRID_SIZE_IN_CELLS[1];
+
+  console.log(GRID_CELL_SIZE_X, GRID_CELL_SIZE_Y);
+
+  const particleStorageSizeInBytes =
+    particleComputeShader.structs["Particle"].size * PARTICLE_MAX_COUNT;
+
+  globalUniforms.set({
+    canvasSize: [context.canvas.width, context.canvas.height],
+    particleSize: settings.particleSize,
+    gridCellSizeInPixels: [GRID_CELL_SIZE_X, GRID_CELL_SIZE_Y],
+    gridSize: GRID_SIZE_IN_CELLS,
+  });
+
+  device.queue.writeBuffer(globalUniformsBuffer, 0, globalUniforms.arrayBuffer);
+
+  const particleStorageBuffer = device.createBuffer({
+    label: "Particle storage buffer",
+    size: particleStorageSizeInBytes,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+
+  const particleHeadsStorageBuffer = device.createBuffer({
+    label: "Particle heads storage buffer",
+    size: PARTICLE_MAX_COUNT * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+
+  const particleListsStorageBuffer = device.createBuffer({
+    label: "Particle lists storage buffer",
+    size: PARTICLE_MAX_COUNT * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+
+  const particleView = makeStructuredView(
+    particleComputeShader.storages["particles"],
+    new ArrayBuffer(particleStorageSizeInBytes)
+  );
+
+  for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
+    const angle = rand() * 2 * Math.PI;
+
+    particleView.views[i].oldPosition.set([
+      context.canvas.width / 2,
+      context.canvas.height / 2,
+    ]);
+
+    // particleView.views[i].oldPosition.set([
+    //   rand(0, context.canvas.width),
+    //   rand(0, context.canvas.height),
+    // ]);
+
+    particleView.views[i].mass.set([rand(settings.minMass, settings.maxMass)]);
+    particleView.views[i].collisionOtherIndex.set([-1]);
+
+    const speed = settings.speed;
+    particleView.views[i].velocity.set([
+      Math.cos(angle) * speed,
+      Math.sin(angle) * speed,
+    ]);
+  }
+
+  device.queue.writeBuffer(particleStorageBuffer, 0, particleView.arrayBuffer);
+
+  bindGroups.bindGroup0_c = device.createBindGroup({
+    label: "bindGroup0_c",
+    layout: computeBindGroupLayout,
+    entries: [
+      {
+        binding: 0,
+        resource: { buffer: particleStorageBuffer },
+      },
+      {
+        binding: 1,
+        resource: { buffer: particleHeadsStorageBuffer },
+      },
+      {
+        binding: 2,
+        resource: { buffer: particleListsStorageBuffer },
+      },
+    ],
+  });
+
+  bindGroups.bindGroup0 = device.createBindGroup({
+    label: "bindGroup0",
+    layout: particleBindGroupLayout,
+    entries: [
+      {
+        binding: 0,
+        resource: { buffer: particleStorageBuffer },
+      },
+    ],
+  });
+}
+
+function hexToRgb(hex: string) {
+  var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? [
+        parseInt(result[1], 16) / 255,
+        parseInt(result[2], 16) / 255,
+        parseInt(result[3], 16) / 255,
+      ]
+    : [0, 0, 0];
 }
 
 async function setup() {
@@ -537,11 +591,62 @@ async function setup() {
 
   const gui = new GUI();
 
+  const settings = {
+    particleCount: 60 * 100,
+    update: () => {},
+    gridSizeX: 0,
+    gridSizeY: 0,
+    speed: 10,
+    color1: "#FFFFFF",
+    color2: "#000000",
+    backgroundColor: "#000000",
+    tempOnHit: 0.6,
+    cooldownRate: 0.3,
+    particleSize : 1,
+    minMass: 1,
+    maxMass: 10,
+    restart: updateParticleCount
+  };
+
+  gui.add(settings, "particleCount", 0, undefined, 60).onChange(updateParticleCount);
+  gui.add(settings, "speed").onChange(updateParticleCount);
+  gui.add(settings, "particleSize").onChange(updateParticleCount)
+  gui.add(settings, "minMass").onChange(updateParticleCount);
+  gui.add(settings, "maxMass").onChange(updateParticleCount)
+  
+  gui.addColor(settings, "color1").onChange(updateRenderUniforms);
+  gui.addColor(settings, "color2").onChange(updateRenderUniforms);
+  gui.addColor(settings, "backgroundColor");
+
+  gui.add(settings,"tempOnHit").onChange(updateStaticSimulationUniforms);
+  gui.add(settings,"cooldownRate").onChange(updateStaticSimulationUniforms);
+  gui.add(settings, "restart");
+
   var stats = new Stats();
   stats.showPanel(1); // 0: fps, 1: ms, 2: mb, 3+: custom
   document.body.appendChild(stats.dom);
 
-  return { device, canvasFormat, context, overlayContext, stats };
+  return { device, canvasFormat, context, overlayContext, stats, settings };
+}
+
+function updateRenderUniforms(){
+
+  renderUniforms.set({
+    color1: hexToRgb(settings.color1),
+    color2: hexToRgb(settings.color2)
+  });
+
+  device.queue.writeBuffer(renderUniformsBuffer, 0, renderUniforms.arrayBuffer);
+}
+
+function updateStaticSimulationUniforms(){
+
+  staticSimulationUniforms.set({
+    tempOnHit: settings.tempOnHit,
+    cooldownRate: settings.cooldownRate
+  });
+
+  device.queue.writeBuffer(staticSimulationUniformsBuffer, 0, staticSimulationUniforms.arrayBuffer);
 }
 
 function rand(min = 0, max = 1) {

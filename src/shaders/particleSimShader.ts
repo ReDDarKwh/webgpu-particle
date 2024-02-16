@@ -8,20 +8,20 @@ export default class particleSimShader extends Shader {
   constructor(
     workgroupSize: number,
     label: string,
-    device: GPUDevice,
-    gridSize: number[]
+    device: GPUDevice
   ) {
     super(
       /* wgsl */ `
             
         ${common}
 
-        const gridSize = vec2u(${gridSize[0]}, ${gridSize[1]});
-
-        const gridSizeI = vec2i(${gridSize[0]}, ${gridSize[1]});
-
         struct SimulationUniforms{
             deltaTime: f32
+        }
+
+        struct StaticSimulationUniforms{
+            tempOnHit: f32,
+            cooldownRate: f32
         }
 
         @group(1) @binding(0) var<storage, read_write> particles: array<Particle>;
@@ -29,10 +29,11 @@ export default class particleSimShader extends Shader {
         @group(1) @binding(2) var<storage, read_write> particleLists: array<i32>;
         
         @group(2) @binding(0) var<uniform> simulation : SimulationUniforms;
+        @group(2) @binding(1) var<uniform> ssu: StaticSimulationUniforms;
 
         fn getIndexFromGridPos(gridPos : vec2u) -> u32{
 
-            return gridPos.x + gridPos.y * gridSize.x;
+            return gridPos.x + gridPos.y * globals.gridSize.x;
         }
 
         fn applyCollision(
@@ -50,7 +51,7 @@ export default class particleSimShader extends Shader {
                             2 * o.mass / (p.mass + o.mass) * o.oldVelocity;
                     
                     p.velocity = v;
-                    p.temp = min(1, p.temp + 0.06);
+                    p.temp = min(1, p.temp + ssu.tempOnHit);
                     particles[global_invocation_index] = p;
                 }
             }
@@ -74,7 +75,7 @@ export default class particleSimShader extends Shader {
             atomicStore(&particleHeads[global_invocation_index], -1);
 
             var p = particles[global_invocation_index];
-            p.temp = max(0.1, p.temp - 0.2 * simulation.deltaTime);
+            p.temp = max(0.1, p.temp - ssu.cooldownRate * simulation.deltaTime);
             particles[global_invocation_index] = p;
         }
         
@@ -160,9 +161,9 @@ export default class particleSimShader extends Shader {
                     let gridCoordsWithOffset = gridCoords + vec2i(x,y); 
 
                     if( gridCoordsWithOffset.x < 0 || 
-                        gridCoordsWithOffset.x > gridSizeI.x - 1 || 
+                        gridCoordsWithOffset.x > i32(globals.gridSize.x) - 1 || 
                         gridCoordsWithOffset.y < 0 || 
-                        gridCoordsWithOffset.y > gridSizeI.y - 1)
+                        gridCoordsWithOffset.y > i32(globals.gridSize.y) - 1)
                     {
                         continue;
                     }
@@ -178,7 +179,7 @@ export default class particleSimShader extends Shader {
                             let o = particles[particleIndex];
                             let d = p.position - o.position;
                             let l = length(d);
-                            let r2 = globals.particleSize;
+                            let r2 = globals.particleSize * 2;
 
                             if(l < r2){
 
