@@ -481,15 +481,15 @@ function updateParticleCount() {
   for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
     const angle = rand() * 2 * Math.PI;
 
-    particleView.views[i].oldPosition.set([
-      context.canvas.width / 2,
-      context.canvas.height / 2,
-    ]);
-
     // particleView.views[i].oldPosition.set([
-    //   rand(0, context.canvas.width),
-    //   rand(0, context.canvas.height),
+    //   context.canvas.width / 2,
+    //   context.canvas.height / 2,
     // ]);
+
+    particleView.views[i].oldPosition.set([
+      rand(0, context.canvas.width),
+      rand(0, context.canvas.height),
+    ]);
 
     particleView.views[i].mass.set([rand(settings.minMass, settings.maxMass)]);
     particleView.views[i].collisionOtherIndex.set([-1]);

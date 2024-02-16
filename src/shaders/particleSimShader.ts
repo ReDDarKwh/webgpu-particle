@@ -75,7 +75,7 @@ export default class particleSimShader extends Shader {
             atomicStore(&particleHeads[global_invocation_index], -1);
 
             var p = particles[global_invocation_index];
-            p.temp = max(0.1, p.temp - ssu.cooldownRate * simulation.deltaTime);
+            p.temp = max(0, p.temp - ssu.cooldownRate * simulation.deltaTime);
             particles[global_invocation_index] = p;
         }
         
