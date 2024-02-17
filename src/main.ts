@@ -1,5 +1,5 @@
 import "./style.css";
-import { makeStructuredView } from "webgpu-utils";
+import { makeStructuredView, setVertexAndIndexBuffers } from "webgpu-utils";
 import particleSimShader from "./shaders/particleSimShader";
 import renderParticleShader from "./shaders/renderParticleShader";
 import Shader from "./shaders/shader";
@@ -481,15 +481,20 @@ function updateParticleCount() {
   for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
     const angle = rand() * 2 * Math.PI;
 
-    // particleView.views[i].oldPosition.set([
-    //   context.canvas.width / 2,
-    //   context.canvas.height / 2,
-    // ]);
-
-    particleView.views[i].oldPosition.set([
-      rand(0, context.canvas.width),
-      rand(0, context.canvas.height),
-    ]);
+    switch(settings.startingPosition){
+      case "random" :
+        particleView.views[i].oldPosition.set([
+          rand(0, context.canvas.width),
+          rand(0, context.canvas.height),
+        ]);
+      break;
+      case "ring" :
+        particleView.views[i].oldPosition.set([
+          context.canvas.width / 2,
+          context.canvas.height / 2,
+        ]);
+      break;
+    }
 
     particleView.views[i].mass.set([rand(settings.minMass, settings.maxMass)]);
     particleView.views[i].collisionOtherIndex.set([-1]);
@@ -605,14 +610,15 @@ async function setup() {
     particleSize : 1,
     minMass: 1,
     maxMass: 10,
+    startingPosition : "random",
     restart: updateParticleCount
   };
 
   gui.add(settings, "particleCount", 0, undefined, 60).onChange(updateParticleCount);
   gui.add(settings, "speed").onChange(updateParticleCount);
-  gui.add(settings, "particleSize").onChange(updateParticleCount)
+  gui.add(settings, "particleSize").onChange(updateParticleCount);
   gui.add(settings, "minMass").onChange(updateParticleCount);
-  gui.add(settings, "maxMass").onChange(updateParticleCount)
+  gui.add(settings, "maxMass").onChange(updateParticleCount);
   
   gui.addColor(settings, "color1").onChange(updateRenderUniforms);
   gui.addColor(settings, "color2").onChange(updateRenderUniforms);
@@ -620,6 +626,10 @@ async function setup() {
 
   gui.add(settings,"tempOnHit").onChange(updateStaticSimulationUniforms);
   gui.add(settings,"cooldownRate").onChange(updateStaticSimulationUniforms);
+
+  gui.add(settings, "startingPosition", ["random", "ring"]).onChange(updateParticleCount);
+
+
   gui.add(settings, "restart");
 
   var stats = new Stats();
