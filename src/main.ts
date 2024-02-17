@@ -1,19 +1,16 @@
 import "./style.css";
-import { makeStructuredView, setVertexAndIndexBuffers } from "webgpu-utils";
+import { makeStructuredView } from "webgpu-utils";
 import particleSimShader from "./shaders/particleSimShader";
 import renderParticleShader from "./shaders/renderParticleShader";
 import Shader from "./shaders/shader";
 import { GUI } from "dat.gui";
 import Stats from "stats.js";
 
-declare var WebGPURecorder: any;
 
-const { device, canvasFormat, context, stats, overlayContext, settings } =
+const { device, canvasFormat, context, stats, settings } =
   await setup();
 
-const PARTICLE_SIZE = 1;
 const WORKGROUP_SIZE = 60;
-const PARTICLE_SPEED = 10;
 let WORKGROUP_NUM: number;
 let PARTICLE_MAX_COUNT: number;
 
@@ -151,8 +148,8 @@ function update(time: number) {
 
   const encoder = device.createCommandEncoder();
 
-  compute(encoder, step);
-  render(encoder, step);
+  compute(encoder);
+  render(encoder);
 
   device.queue.submit([encoder.finish()]);
 
@@ -162,7 +159,7 @@ function update(time: number) {
 
 requestAnimationFrame(update);
 
-function compute(encoder: GPUCommandEncoder, step: number) {
+function compute(encoder: GPUCommandEncoder) {
   {
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, commonBindGroup);
@@ -178,7 +175,7 @@ function compute(encoder: GPUCommandEncoder, step: number) {
   }
 }
 
-function render(encoder: GPUCommandEncoder, step: number) {
+function render(encoder: GPUCommandEncoder) {
   const canvasTexture = context.getCurrentTexture();
   (renderPassDescriptor.colorAttachments[0] as any).view =
     canvasTexture.createView();
@@ -706,29 +703,4 @@ function GetGridSize({
     : [Math.min(c[0], c[1]), Math.max(c[0], c[1])];
 }
 
-function drawBoard(
-  overlayContext: CanvasRenderingContext2D,
-  gridSize: number[]
-) {
-  // Box width
-  var bw = overlayContext.canvas.width;
-  // Box height
-  var bh = overlayContext.canvas.height;
-  // Padding
-  var p = 0;
 
-  const cx = overlayContext.canvas.width / gridSize[0];
-  const cy = overlayContext.canvas.height / gridSize[1];
-
-  for (var x = 0; x <= bw; x += cx) {
-    overlayContext.moveTo(0.5 + x + p, p);
-    overlayContext.lineTo(0.5 + x + p, bh + p);
-  }
-
-  for (var x = 0; x <= bh; x += cy) {
-    overlayContext.moveTo(p, 0.5 + x + p);
-    overlayContext.lineTo(bw + p, 0.5 + x + p);
-  }
-  overlayContext.strokeStyle = "black";
-  overlayContext.stroke();
-}

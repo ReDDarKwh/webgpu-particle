@@ -4,7 +4,6 @@ import {
     VariableDefinitions,
     makeShaderDataDefinitions,
   } from 'webgpu-utils';
-import stringTemplate from '../stringTemplate';
 
 export default abstract class Shader{
 
