@@ -122,6 +122,7 @@ const renderPassDescriptor = {
 
 updateParticleCount();
 updateRenderUniforms();
+updateStaticSimulationUniforms();
 
 let step = 0;
 let oldTime = 0;
@@ -610,23 +611,20 @@ async function setup() {
     startingPosition : "random",
     restart: updateParticleCount
   };
-
+  
+  gui.useLocalStorage = true;
+  gui.remember(settings);
   gui.add(settings, "particleCount", 0, undefined, 60).onChange(updateParticleCount);
   gui.add(settings, "speed").onChange(updateParticleCount);
   gui.add(settings, "particleSize").onChange(updateParticleCount);
   gui.add(settings, "minMass").onChange(updateParticleCount);
   gui.add(settings, "maxMass").onChange(updateParticleCount);
-  
   gui.addColor(settings, "color1").onChange(updateRenderUniforms);
   gui.addColor(settings, "color2").onChange(updateRenderUniforms);
   gui.addColor(settings, "backgroundColor");
-
   gui.add(settings,"tempOnHit").onChange(updateStaticSimulationUniforms);
   gui.add(settings,"cooldownRate").onChange(updateStaticSimulationUniforms);
-
   gui.add(settings, "startingPosition", ["random", "ring"]).onChange(updateParticleCount);
-
-
   gui.add(settings, "restart");
 
   var stats = new Stats();
