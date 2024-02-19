@@ -40,7 +40,7 @@ export default class renderParticleShader extends Shader{
                 );
 
                 let vertexPosition = vertices[vertexIndex];
-                let pos = (vertexPosition * globals.particleSize * 1.1  + particles[instance].position) / globals.canvasSize * 2 - 1;
+                let pos = (vertexPosition * globals.particleSize * 1.1  + particles[instance].pos) / globals.canvasSize * 2 - 1;
 
                 var vsOut: VSOutput;
                 vsOut.position = vec4f(pos, 0.0, 1.0);

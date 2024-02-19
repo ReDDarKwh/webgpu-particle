@@ -6,9 +6,7 @@ import Shader from "./shaders/shader";
 import { GUI } from "dat.gui";
 import Stats from "stats.js";
 
-
-const { device, canvasFormat, context, stats, settings } =
-  await setup();
+const { device, canvasFormat, context, stats, settings, input } = await setup();
 
 const WORKGROUP_SIZE = 60;
 let WORKGROUP_NUM: number;
@@ -29,8 +27,10 @@ const particleRenderShader = new renderParticleShader(
 const { view: simulationUniforms, buffer: simulationUniformsBuffer } =
   makeUniformViewAndBuffer(particleComputeShader, "SimulationUniforms");
 
-const { view: staticSimulationUniforms, buffer: staticSimulationUniformsBuffer } =
-makeUniformViewAndBuffer(particleComputeShader, "StaticSimulationUniforms");
+const {
+  view: staticSimulationUniforms,
+  buffer: staticSimulationUniformsBuffer,
+} = makeUniformViewAndBuffer(particleComputeShader, "StaticSimulationUniforms");
 
 const { view: globalUniforms, buffer: globalUniformsBuffer } =
   makeUniformViewAndBuffer(particleComputeShader, "GlobalUniforms");
@@ -138,6 +138,8 @@ function update(time: number) {
   // Set some values via set
   simulationUniforms.set({
     deltaTime: dt,
+    attractorPos: input.mousePos,
+    isAttractorEnabled : input.isMouseDown ? 1 : 0
   });
 
   // Upload the data to the GPU
@@ -180,8 +182,11 @@ function render(encoder: GPUCommandEncoder) {
   const canvasTexture = context.getCurrentTexture();
   (renderPassDescriptor.colorAttachments[0] as any).view =
     canvasTexture.createView();
-  
-  (renderPassDescriptor.colorAttachments[0] as any).clearValue = [...hexToRgb(settings.backgroundColor), 1];
+
+  (renderPassDescriptor.colorAttachments[0] as any).clearValue = [
+    ...hexToRgb(settings.backgroundColor),
+    1,
+  ];
 
   const pass = encoder.beginRenderPass(
     renderPassDescriptor as GPURenderPassDescriptor
@@ -479,26 +484,26 @@ function updateParticleCount() {
   for (let i = 0; i < PARTICLE_MAX_COUNT; ++i) {
     const angle = rand() * 2 * Math.PI;
 
-    switch(settings.startingPosition){
-      case "random" :
-        particleView.views[i].oldPosition.set([
+    switch (settings.startingPosition) {
+      case "random":
+        particleView.views[i].pos.set([
           rand(0, context.canvas.width),
           rand(0, context.canvas.height),
         ]);
-      break;
-      case "ring" :
-        particleView.views[i].oldPosition.set([
+        break;
+      case "ring":
+        particleView.views[i].pos.set([
           context.canvas.width / 2,
           context.canvas.height / 2,
         ]);
-      break;
+        break;
     }
 
     particleView.views[i].mass.set([rand(settings.minMass, settings.maxMass)]);
     particleView.views[i].collisionOtherIndex.set([-1]);
 
     const speed = settings.speed;
-    particleView.views[i].velocity.set([
+    particleView.views[i].vel.set([
       Math.cos(angle) * speed,
       Math.sin(angle) * speed,
     ]);
@@ -586,6 +591,37 @@ async function setup() {
   if (!context) {
     throw new Error("Yo! No Canvas GPU context found.");
   }
+
+  const offset = (el: HTMLElement) => {
+    var rect = el.getBoundingClientRect(),
+      scrollLeft = window.pageXOffset || document.documentElement.scrollLeft,
+      scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    return { top: rect.top + scrollTop, left: rect.left + scrollLeft };
+  };
+
+  const canvasOffset = offset(canvas);
+
+  const input = {
+    isMouseDown: false,
+    mousePos: [0,0]
+  };
+
+  document.addEventListener("mousemove", (event: MouseEvent) => {
+    const mp = [
+      Math.max(0, Math.min(event.clientX - canvasOffset.left, canvas.width)),
+      Math.max(0, Math.min(canvas.height - (event.clientY - canvasOffset.top), canvas.height)),
+    ];
+    input.mousePos = mp;
+  });
+
+  document.addEventListener("mousedown", () => {
+    input.isMouseDown = true;
+  });
+
+  document.addEventListener("mouseup", () => {
+    input.isMouseDown = false;
+  });
+
   const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   context.configure({
     device: device,
@@ -605,16 +641,19 @@ async function setup() {
     backgroundColor: "#000000",
     tempOnHit: 0.6,
     cooldownRate: 0.3,
-    particleSize : 1,
+    particleSize: 1,
     minMass: 1,
     maxMass: 10,
-    startingPosition : "random",
-    restart: updateParticleCount
+    attractorMass: 20,
+    startingPosition: "random",
+    restart: updateParticleCount,
   };
-  
+
   gui.useLocalStorage = true;
   gui.remember(settings);
-  gui.add(settings, "particleCount", 0, undefined, 60).onChange(updateParticleCount);
+  gui
+    .add(settings, "particleCount", 0, undefined, 60)
+    .onChange(updateParticleCount);
   gui.add(settings, "speed").onChange(updateParticleCount);
   gui.add(settings, "particleSize").onChange(updateParticleCount);
   gui.add(settings, "minMass").onChange(updateParticleCount);
@@ -622,36 +661,42 @@ async function setup() {
   gui.addColor(settings, "color1").onChange(updateRenderUniforms);
   gui.addColor(settings, "color2").onChange(updateRenderUniforms);
   gui.addColor(settings, "backgroundColor");
-  gui.add(settings,"tempOnHit").onChange(updateStaticSimulationUniforms);
-  gui.add(settings,"cooldownRate").onChange(updateStaticSimulationUniforms);
-  gui.add(settings, "startingPosition", ["random", "ring"]).onChange(updateParticleCount);
+  gui.add(settings, "attractorMass").onChange(updateStaticSimulationUniforms);
+  gui.add(settings, "tempOnHit").onChange(updateStaticSimulationUniforms);
+  gui.add(settings, "cooldownRate").onChange(updateStaticSimulationUniforms);
+  gui
+    .add(settings, "startingPosition", ["random", "ring"])
+    .onChange(updateParticleCount);
   gui.add(settings, "restart");
 
   var stats = new Stats();
   stats.showPanel(1); // 0: fps, 1: ms, 2: mb, 3+: custom
   document.body.appendChild(stats.dom);
 
-  return { device, canvasFormat, context, overlayContext, stats, settings };
+  return { device, canvasFormat, context, overlayContext, stats, settings, input };
 }
 
-function updateRenderUniforms(){
-
+function updateRenderUniforms() {
   renderUniforms.set({
     color1: hexToRgb(settings.color1),
-    color2: hexToRgb(settings.color2)
+    color2: hexToRgb(settings.color2),
   });
 
   device.queue.writeBuffer(renderUniformsBuffer, 0, renderUniforms.arrayBuffer);
 }
 
-function updateStaticSimulationUniforms(){
-
+function updateStaticSimulationUniforms() {
   staticSimulationUniforms.set({
     tempOnHit: settings.tempOnHit,
-    cooldownRate: settings.cooldownRate
+    cooldownRate: settings.cooldownRate,
+    attractorMass : settings.attractorMass
   });
 
-  device.queue.writeBuffer(staticSimulationUniformsBuffer, 0, staticSimulationUniforms.arrayBuffer);
+  device.queue.writeBuffer(
+    staticSimulationUniformsBuffer,
+    0,
+    staticSimulationUniforms.arrayBuffer
+  );
 }
 
 function rand(min = 0, max = 1) {
@@ -700,5 +745,3 @@ function GetGridSize({
     ? [Math.max(c[0], c[1]), Math.min(c[0], c[1])]
     : [Math.min(c[0], c[1]), Math.max(c[0], c[1])];
 }
-
-
