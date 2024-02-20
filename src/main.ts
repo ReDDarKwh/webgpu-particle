@@ -486,18 +486,20 @@ function updateParticleCount() {
 
     switch (settings.startingPosition) {
       case "random":
-        particleView.views[i].pos.set([
+        particleView.views[i].nextPos.set([
           rand(0, context.canvas.width),
           rand(0, context.canvas.height),
         ]);
         break;
       case "ring":
-        particleView.views[i].pos.set([
+        particleView.views[i].nextPos.set([
           context.canvas.width / 2,
           context.canvas.height / 2,
         ]);
         break;
     }
+
+    particleView.views[i].cellIndexStart = [Math.floor(Math.random() * 3), Math.floor(Math.random() * 3)];
 
     particleView.views[i].mass.set([rand(settings.minMass, settings.maxMass)]);
     particleView.views[i].collisionOtherIndex.set([-1]);

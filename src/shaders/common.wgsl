@@ -1,12 +1,13 @@
 
 struct Particle {
+  nextPos : vec2f,
   pos : vec2f,
   vel : vec2f,
   nextVel: vec2f,
   acc : vec2f,
   collisionOtherIndex : i32,
   mass : f32,
-  temp : f32
+  temp : f32,
 };
 
 struct GlobalUniforms{

@@ -25,7 +25,9 @@ export default class particleSimShader extends Shader {
 
         const G = 0.5;
         const E = 0.9;
+        const MAX_COL = 1;
         const maxAttractorForce = 100;
+        const cellsOffsets = array(0, -1, 1);
 
         @group(1) @binding(0) var<storage, read_write> particles: array<Particle>;
         @group(1) @binding(1) var<storage, read_write> particleHeads: array<atomic<i32>>;
@@ -51,9 +53,7 @@ export default class particleSimShader extends Shader {
                 if(o.collisionOtherIndex == i32(global_invocation_index)){
 
                     let vCom = (p.mass * p.vel + o.mass * o.vel) / (p.mass + o.mass);
-                    
                     let v = (1 + E) * vCom - E * p.vel;
-
                     p.nextVel = v;
                     p.temp = min(1, p.temp + ssu.tempOnHit);
                     particles[global_invocation_index] = p;
@@ -115,7 +115,7 @@ export default class particleSimShader extends Shader {
 
             var p = particles[global_invocation_index];
 
-            var newPos = p.pos + p.nextVel * simulation.deltaTime + p.acc * (simulation.deltaTime * simulation.deltaTime * 0.5);
+            var newPos = p.nextPos + p.nextVel * simulation.deltaTime + p.acc * (simulation.deltaTime * simulation.deltaTime * 0.5);
             let newAcc = applyForces(newPos, p.mass);
             var newVel = p.nextVel + (p.acc + newAcc) * (simulation.deltaTime * 0.5);
 
@@ -137,6 +137,7 @@ export default class particleSimShader extends Shader {
             newVel *= screenBounce;
 
             p.pos = newPos;
+            p.nextPos = newPos;
             p.acc = newAcc;
             p.vel = newVel;
 
@@ -168,10 +169,21 @@ export default class particleSimShader extends Shader {
 
             let gridCoords = vec2i(p.pos / globals.gridCellSizeInPixels);
 
-            for(var y = -1; y < 2; y++)
+            var colNum = 0;
+
+            for(var i : u32 = 0; i < 3; i++)
             {
-                for(var x = -1; x < 2; x++)
+                let y = cellsOffsets[i];
+
+                for(var j : u32 = 0; j < 3; j++)
                 {
+
+                    let x = cellsOffsets[j];
+
+                    if(colNum > MAX_COL){
+                        break;
+                    }
+
                     let gridCoordsWithOffset = gridCoords + vec2i(x,y);
 
                     if( gridCoordsWithOffset.x < 0 ||
@@ -186,7 +198,7 @@ export default class particleSimShader extends Shader {
 
                     var particleIndex = atomicLoad(&particleHeads[gridCoordsIndex]);
 
-                    while(particleIndex >= 0){
+                    while(particleIndex >= 0 && colNum <= MAX_COL){
 
                         if(particleIndex != i32(global_invocation_index)){
 
@@ -198,21 +210,14 @@ export default class particleSimShader extends Shader {
                             if(l < r2){
 
                                 let overlap = r2 - l;
-                                p.pos += d/l * overlap;
-
+                                p.nextPos += d/l * overlap;
                                 p.collisionOtherIndex = particleIndex;
-                                break;
+                                colNum ++;
                             }
                         }
 
                         particleIndex = particleLists[particleIndex];
                     }
-                    if(p.collisionOtherIndex != -1){
-                        break;
-                    }
-                }
-                if(p.collisionOtherIndex != -1){
-                    break;
                 }
             }
 
