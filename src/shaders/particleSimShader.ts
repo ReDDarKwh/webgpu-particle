@@ -24,6 +24,7 @@ export default class particleSimShader extends Shader {
         }
 
         const G = 0.5;
+        const E = 0.9;
         const maxAttractorForce = 100;
 
         @group(1) @binding(0) var<storage, read_write> particles: array<Particle>;
@@ -49,8 +50,9 @@ export default class particleSimShader extends Shader {
 
                 if(o.collisionOtherIndex == i32(global_invocation_index)){
 
-                    let v = (p.mass - o.mass)/(p.mass + o.mass) * p.vel +
-                            2 * o.mass / (p.mass + o.mass) * o.vel;
+                    let vCom = (p.mass * p.vel + o.mass * o.vel) / (p.mass + o.mass);
+                    
+                    let v = (1 + E) * vCom - E * p.vel;
 
                     p.nextVel = v;
                     p.temp = min(1, p.temp + ssu.tempOnHit);
@@ -89,8 +91,8 @@ export default class particleSimShader extends Shader {
             var force = vec2f();
             if(simulation.isAttractorEnabled == 1){
                 let pToA = simulation.attractorPos - pos;
-                let distance = length(pToA);
-                force += normalize(pToA) * min(maxAttractorForce, G * (mass * ssu.attractorMass / (distance * distance)));
+                let distance = pow(pToA.x, 2) + pow(pToA.y, 2);
+                force += normalize(pToA) * min(maxAttractorForce, G * (mass * ssu.attractorMass / distance));
             }
 
             return force;
