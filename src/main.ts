@@ -505,7 +505,7 @@ function updateParticleCount() {
     particleView.views[i].collisionOtherIndex.set([-1]);
 
     const speed = settings.speed;
-    particleView.views[i].vel.set([
+    particleView.views[i].nextVel.set([
       Math.cos(angle) * speed,
       Math.sin(angle) * speed,
     ]);
@@ -648,6 +648,7 @@ async function setup() {
     maxMass: 10,
     attractorMass: 20,
     startingPosition: "random",
+    E:0.5,
     restart: updateParticleCount,
   };
 
@@ -666,6 +667,7 @@ async function setup() {
   gui.add(settings, "attractorMass").onChange(updateStaticSimulationUniforms);
   gui.add(settings, "tempOnHit").onChange(updateStaticSimulationUniforms);
   gui.add(settings, "cooldownRate").onChange(updateStaticSimulationUniforms);
+  gui.add(settings, "E").onChange(updateStaticSimulationUniforms);
   gui
     .add(settings, "startingPosition", ["random", "ring"])
     .onChange(updateParticleCount);
@@ -691,7 +693,8 @@ function updateStaticSimulationUniforms() {
   staticSimulationUniforms.set({
     tempOnHit: settings.tempOnHit,
     cooldownRate: settings.cooldownRate,
-    attractorMass : settings.attractorMass
+    attractorMass : settings.attractorMass,
+    E: settings.E
   });
 
   device.queue.writeBuffer(
