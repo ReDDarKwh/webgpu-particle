@@ -27,7 +27,7 @@ export default class particleSimShader extends Shader {
 
         const G = 0.5;
         const E = 0.7;
-        const MAX_COL = 10;
+        const MAX_COL = 5;
         const maxAttractorForce = 100;
         const cellsOffsets = array(0, -1, 1);
         const overlapCorrectionForce = 0.5;
@@ -58,7 +58,6 @@ export default class particleSimShader extends Shader {
                     let vCom = (p.mass * p.nextVel + o.mass * o.vel) / (p.mass + o.mass);
                     let v = (1 + ssu.E) * vCom - ssu.E * p.nextVel;
                     p.nextVel = v;
-                    p.temp = min(1, p.temp + ssu.tempOnHit);
                     particles[global_invocation_index] = p;
                 }
             }
@@ -219,11 +218,14 @@ export default class particleSimShader extends Shader {
                                 let overlap = r2WithPadding - l;
                                 
                                 p.nextVel += normal * overlap * overlapCorrectionForce;
-                                
-                                if(partnerFound == 0 && l < r2){
-                                    p.collisionOtherIndex = particleIndex;
-                                    p.nextPos += normal * (r2-l) * 0.5;
-                                    partnerFound = 1;
+
+                                if(l < r2){
+                                    p.temp = min(1, p.temp + ssu.tempOnHit);
+                                    if(partnerFound == 0){
+                                        p.collisionOtherIndex = particleIndex;
+                                        p.nextPos += normal * (r2-l) * 0.5;
+                                        partnerFound = 1;
+                                    }
                                 }
 
                                 colNum ++;
