@@ -8,6 +8,9 @@ struct Particle {
   collisionOtherIndex : i32,
   mass : f32,
   temp : f32,
+  cellsOffsetsX : array<i32,3>,
+  cellsOffsetsY : array<i32,3>
+  
 };
 
 struct GlobalUniforms{

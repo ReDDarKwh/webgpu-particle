@@ -14,7 +14,8 @@ export default class particleSimShader extends Shader {
         struct SimulationUniforms{
             deltaTime: f32,
             attractorPos: vec2f,
-            isAttractorEnabled : u32
+            isAttractorEnabled : u32,
+            currentFrame:u32
         }
 
         struct StaticSimulationUniforms{
@@ -29,7 +30,7 @@ export default class particleSimShader extends Shader {
         const MAX_COL = 10;
         const maxAttractorForce = 100;
         const cellsOffsets = array(0, -1, 1);
-        const overlapCorrectionForce = 1;
+        const overlapCorrectionForce = 0.5;
 
         @group(1) @binding(0) var<storage, read_write> particles: array<Particle>;
         @group(1) @binding(1) var<storage, read_write> particleHeads: array<atomic<i32>>;
@@ -54,16 +55,8 @@ export default class particleSimShader extends Shader {
 
                 if(o.collisionOtherIndex == i32(global_invocation_index)){
 
-                    let d = p.pos - o.pos;
-                    let l = length(d);
-                    let r2 = globals.particleSize * 2;
-                    let normal = normalize(d);
-                    let overlap = r2 - l;
-
-                    p.nextPos += normal * overlap * 0.5;
-
-                    let vCom = (p.mass * p.vel + o.mass * o.vel) / (p.mass + o.mass);
-                    let v = (1 + ssu.E) * vCom - ssu.E * p.vel;
+                    let vCom = (p.mass * p.nextVel + o.mass * o.vel) / (p.mass + o.mass);
+                    let v = (1 + ssu.E) * vCom - ssu.E * p.nextVel;
                     p.nextVel = v;
                     p.temp = min(1, p.temp + ssu.tempOnHit);
                     particles[global_invocation_index] = p;
@@ -90,7 +83,6 @@ export default class particleSimShader extends Shader {
             
             var p = particles[global_invocation_index];
             p.temp = max(0, p.temp - ssu.cooldownRate * simulation.deltaTime);
-            //p.nextVel = p.vel;
             particles[global_invocation_index] = p;
             
             applyCollision(global_invocation_index);
@@ -184,15 +176,16 @@ export default class particleSimShader extends Shader {
             let gridCoords = vec2i(p.pos / globals.gridCellSizeInPixels);
 
             var colNum = 0;
+            var partnerFound = 0;
 
             for(var i : u32 = 0; i < 3; i++)
             {
-                let y = cellsOffsets[i];
+                let y = p.cellsOffsetsY[(i + u32(random(f32(simulation.currentFrame) * p.mass * 0.34615462) * 10)) % 3];
 
                 for(var j : u32 = 0; j < 3; j++)
                 {
 
-                    let x = cellsOffsets[j];
+                    let x = p.cellsOffsetsX[(j + u32(random(f32(simulation.currentFrame) * p.mass * 0.7863435) * 23)) % 3];
 
                     if(colNum > MAX_COL){
                         break;
@@ -222,15 +215,15 @@ export default class particleSimShader extends Shader {
 
                             if(l < r2WithPadding){
                             
-                                if(colNum > 0){
-                                    let normal = normalize(d);
-                                    let overlap = r2WithPadding - l;
-                                    p.nextVel += normal * overlap * overlapCorrectionForce;
-                                    //p.collisionOtherIndex = -1;
-                                }
-
-                                if(l < r2 && colNum == 0){
+                                let normal = normalize(d);
+                                let overlap = r2WithPadding - l;
+                                
+                                p.nextVel += normal * overlap * overlapCorrectionForce;
+                                
+                                if(partnerFound == 0 && l < r2){
                                     p.collisionOtherIndex = particleIndex;
+                                    p.nextPos += normal * (r2-l) * 0.5;
+                                    partnerFound = 1;
                                 }
 
                                 colNum ++;

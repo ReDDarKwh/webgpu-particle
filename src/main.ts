@@ -139,7 +139,8 @@ function update(time: number) {
   simulationUniforms.set({
     deltaTime: dt,
     attractorPos: input.mousePos,
-    isAttractorEnabled : input.isMouseDown ? 1 : 0
+    isAttractorEnabled : input.isMouseDown ? 1 : 0,
+    currentFrame: step
   });
 
   // Upload the data to the GPU
@@ -275,14 +276,14 @@ function createPipelines({
           format: canvasFormat,
           blend: {
             color: {
-              srcFactor: "one",
-              dstFactor: "one-minus-src-alpha",
-              operation: "add",
+              operation: 'add',
+              srcFactor: 'one',
+              dstFactor: 'one',
             },
             alpha: {
-              srcFactor: "one",
-              dstFactor: "one-minus-src-alpha",
-              operation: "add",
+              operation: 'add',
+              srcFactor: 'one',
+              dstFactor: 'one',
             },
           },
         },
@@ -405,8 +406,8 @@ function createLayouts() {
 function createParticleTexture() {
   const ctx = new OffscreenCanvas(32, 32).getContext("2d")!;
 
-  const grd = ctx.createRadialGradient(16, 16, 15, 16, 16, 16);
-  grd.addColorStop(0, "rgba(255,255,255,255)");
+  const grd = ctx.createRadialGradient(16, 16, 10, 16, 16, 16);
+  grd.addColorStop(0, "rgba(255,255,255,200)");
   grd.addColorStop(1, "rgba(255,255,255,0)");
 
   // Draw a filled Rectangle
@@ -428,6 +429,12 @@ function createParticleTexture() {
     [32, 32]
   );
   return texture;
+}
+
+function shuffle(a: any[]){
+  return a.map(value => ({ value, sort: Math.random() }))
+  .sort((a, b) => a.sort - b.sort)
+  .map(({ value }) => value);
 }
 
 function updateParticleCount() {
@@ -503,6 +510,9 @@ function updateParticleCount() {
 
     particleView.views[i].mass.set([rand(settings.minMass, settings.maxMass)]);
     particleView.views[i].collisionOtherIndex.set([-1]);
+
+    particleView.views[i].cellsOffsetsX.set(shuffle([0,-1, 1]));
+    particleView.views[i].cellsOffsetsY.set(shuffle([0,-1, 1]));
 
     const speed = settings.speed;
     particleView.views[i].nextVel.set([
@@ -648,7 +658,7 @@ async function setup() {
     maxMass: 10,
     attractorMass: 20,
     startingPosition: "random",
-    E:0.5,
+    CoefficientOfRestitution:0.5,
     restart: updateParticleCount,
   };
 
@@ -667,7 +677,7 @@ async function setup() {
   gui.add(settings, "attractorMass").onChange(updateStaticSimulationUniforms);
   gui.add(settings, "tempOnHit").onChange(updateStaticSimulationUniforms);
   gui.add(settings, "cooldownRate").onChange(updateStaticSimulationUniforms);
-  gui.add(settings, "E").onChange(updateStaticSimulationUniforms);
+  gui.add(settings, "CoefficientOfRestitution").onChange(updateStaticSimulationUniforms);
   gui
     .add(settings, "startingPosition", ["random", "ring"])
     .onChange(updateParticleCount);
@@ -694,7 +704,7 @@ function updateStaticSimulationUniforms() {
     tempOnHit: settings.tempOnHit,
     cooldownRate: settings.cooldownRate,
     attractorMass : settings.attractorMass,
-    E: settings.E
+    E: settings.CoefficientOfRestitution
   });
 
   device.queue.writeBuffer(
