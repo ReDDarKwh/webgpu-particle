@@ -22,7 +22,8 @@ export default class particleSimShader extends Shader {
             tempOnHit: f32,
             cooldownRate: f32,
             attractorMass: f32,
-            E:f32
+            E:f32,
+            maxColl: u32
         }
 
         const G = 0.5;
@@ -186,7 +187,7 @@ export default class particleSimShader extends Shader {
 
             let gridCoords = vec2i(p.pos / globals.gridCellSizeInPixels);
 
-            var colNum = 0;
+            var colNum = 0u;
             var partnerFound = 0;
 
             for(var i : u32 = 0; i < 3; i++)
@@ -198,7 +199,7 @@ export default class particleSimShader extends Shader {
 
                     let x = p.cellsOffsetsX[(j + u32(random(f32(simulation.currentFrame) * p.mass * 0.7863435) * 23)) % 3];
 
-                    if(colNum > MAX_COL){
+                    if(colNum > ssu.maxColl){
                         break;
                     }
 
@@ -216,7 +217,7 @@ export default class particleSimShader extends Shader {
 
                     var particleIndex = atomicLoad(&particleHeads[gridCoordsIndex]);
 
-                    while(particleIndex >= 0 && colNum <= MAX_COL){
+                    while(particleIndex >= 0 && colNum <= ssu.maxColl){
 
                         if(particleIndex != i32(global_invocation_index)){
 

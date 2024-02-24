@@ -6,7 +6,7 @@ import Shader from "./shaders/shader";
 import { GUI } from "dat.gui";
 import Stats from "stats.js";
 
-const { device, canvasFormat, context, stats, settings, input } = await setup();
+const { device, canvasFormat, context, settings, input } = await setup();
 
 const WORKGROUP_SIZE = 60;
 let WORKGROUP_NUM: number;
@@ -116,7 +116,7 @@ updateStaticSimulationUniforms();
 let step = 0;
 let oldTime = 0;
 function update(time: number) {
-  stats.begin();
+  
 
   step++;
 
@@ -146,7 +146,7 @@ function update(time: number) {
 
   device.queue.submit([encoder.finish()]);
 
-  stats.end();
+ 
   requestAnimationFrame(update);
 }
 
@@ -689,7 +689,112 @@ async function setup() {
     format: canvasFormat,
   });
 
-  const gui = new GUI();
+  const getPresetJSON = () => {
+    return JSON.parse(`
+    {
+      "preset": "BloopBlurp",
+      "closed": false,
+      "remembered": {
+        "Default": {
+          "0": {
+            "particleCount": 60000,
+            "speed": 100,
+            "particleSize": 1,
+            "minMass": 1,
+            "maxMass": 10,
+            "color1": "#FFFFFF",
+            "color2": "#ff0000",
+            "backgroundColor": "#000000",
+            "attractorMass": 1000000,
+            "tempOnHit": 0.6,
+            "cooldownRate": 0.3,
+            "CoefficientOfRestitution": 0.5,
+            "MaxCollisionsPerFrame": 1,
+            "startingPosition": "random"
+          }
+        },
+        "JiggleZoom": {
+          "0": {
+            "particleCount": 60000,
+            "speed": 300,
+            "particleSize": 1,
+            "minMass": 1,
+            "maxMass": 10,
+            "color1": "#00b360",
+            "color2": "#000000",
+            "backgroundColor": "#000000",
+            "attractorMass": 1000000,
+            "tempOnHit": 0.1,
+            "cooldownRate": 1,
+            "CoefficientOfRestitution": 0.6,
+            "MaxCollisionsPerFrame": 2,
+            "startingPosition": "ring"
+          }
+        },
+        "QuirkFactor": {
+          "0": {
+            "particleCount": 300000,
+            "speed": 30,
+            "particleSize": 1,
+            "minMass": 1,
+            "maxMass": 50,
+            "color1": "#d4530d",
+            "color2": "#390000",
+            "backgroundColor": "#090000",
+            "attractorMass": 1000000,
+            "tempOnHit": 0.03,
+            "cooldownRate": 2,
+            "CoefficientOfRestitution": 1,
+            "MaxCollisionsPerFrame": 2,
+            "startingPosition": "random"
+          }
+        },
+        "BloopBlurp": {
+          "0": {
+            "particleCount": 600060,
+            "speed": 200,
+            "particleSize": 1,
+            "minMass": 1,
+            "maxMass": 50,
+            "color1": "#d4530d",
+            "color2": "#390000",
+            "backgroundColor": "#090000",
+            "attractorMass": 10000,
+            "tempOnHit": 0.03,
+            "cooldownRate": 2,
+            "CoefficientOfRestitution": 0.9,
+            "MaxCollisionsPerFrame": 5,
+            "startingPosition": "ring"
+          }
+        }
+      },
+      "folders": {
+        "Attractors": {
+          "preset": "Default",
+          "closed": false,
+          "folders": {}
+        },
+        "Collisions": {
+          "preset": "Default",
+          "closed": false,
+          "folders": {}
+        },
+        "Looks": {
+          "preset": "Default",
+          "closed": false,
+          "folders": {}
+        },
+        "Particles": {
+          "preset": "Default",
+          "closed": false,
+          "folders": {}
+        }
+      }
+    }
+    `);
+  }
+
+  const gui = new GUI({load: getPresetJSON(), preset:"JiggleZoom"});
 
   const settings = {
     particleCount: 60 * 100,
@@ -708,37 +813,43 @@ async function setup() {
     attractorMass: 20,
     startingPosition: "random",
     CoefficientOfRestitution:0.5,
+    MaxCollisionsPerFrame: 5,
     restart: updateParticleCount,
     clearAttractors:clearAttractors
   };
+  
+  
+  const attractors = gui.addFolder("Attractors");
+  const collisions = gui.addFolder("Collisions");
+  const looks = gui.addFolder("Looks")
+  const particles = gui.addFolder("Particles");
+
 
   gui.useLocalStorage = true;
   gui.remember(settings);
-  gui
+  particles
     .add(settings, "particleCount", 0, undefined, 60)
     .onChange(updateParticleCount);
-  gui.add(settings, "speed").onChange(updateParticleCount);
-  gui.add(settings, "particleSize").onChange(updateParticleCount);
-  gui.add(settings, "minMass").onChange(updateParticleCount);
-  gui.add(settings, "maxMass").onChange(updateParticleCount);
-  gui.addColor(settings, "color1").onChange(updateRenderUniforms);
-  gui.addColor(settings, "color2").onChange(updateRenderUniforms);
-  gui.addColor(settings, "backgroundColor");
-  gui.add(settings, "attractorMass").onChange(updateStaticSimulationUniforms);
-  gui.add(settings, "tempOnHit").onChange(updateStaticSimulationUniforms);
-  gui.add(settings, "cooldownRate").onChange(updateStaticSimulationUniforms);
-  gui.add(settings, "CoefficientOfRestitution").onChange(updateStaticSimulationUniforms);
-  gui
+    particles.add(settings, "speed").onChange(updateParticleCount);
+    particles.add(settings, "particleSize").onChange(updateParticleCount);
+    collisions.add(settings, "minMass").onChange(updateParticleCount);
+    collisions.add(settings, "maxMass").onChange(updateParticleCount);
+    looks.addColor(settings, "color1").onChange(updateRenderUniforms);
+    looks.addColor(settings, "color2").onChange(updateRenderUniforms);
+    looks.addColor(settings, "backgroundColor");
+    attractors.add(settings, "attractorMass").onChange(updateStaticSimulationUniforms);
+  looks.add(settings, "tempOnHit").onChange(updateStaticSimulationUniforms);
+  looks.add(settings, "cooldownRate").onChange(updateStaticSimulationUniforms);
+  collisions.add(settings, "CoefficientOfRestitution").onChange(updateStaticSimulationUniforms);
+  collisions.add(settings, "MaxCollisionsPerFrame").onChange(updateStaticSimulationUniforms);
+  
+  particles
     .add(settings, "startingPosition", ["random", "ring"])
     .onChange(updateParticleCount);
   gui.add(settings, "restart");
   gui.add(settings, "clearAttractors");
 
-  var stats = new Stats();
-  stats.showPanel(1); // 0: fps, 1: ms, 2: mb, 3+: custom
-  document.body.appendChild(stats.dom);
-
-  return { device, canvasFormat, context, overlayContext, stats, settings, input };
+  return { device, canvasFormat, context, overlayContext, settings, input };
 }
 
 function updateRenderUniforms() {
@@ -755,7 +866,8 @@ function updateStaticSimulationUniforms() {
     tempOnHit: settings.tempOnHit,
     cooldownRate: settings.cooldownRate,
     attractorMass : settings.attractorMass,
-    E: settings.CoefficientOfRestitution
+    E: settings.CoefficientOfRestitution,
+    maxColl: settings.MaxCollisionsPerFrame
   });
 
   device.queue.writeBuffer(
