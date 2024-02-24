@@ -27,7 +27,7 @@ export default class particleSimShader extends Shader {
 
         const G = 0.5;
         const E = 0.7;
-        const MAX_COL = 5;
+        const MAX_COL = 10;
         const maxAttractorForce = 100;
         const cellsOffsets = array(0, -1, 1);
         const overlapCorrectionForce = 0.5;
@@ -38,6 +38,7 @@ export default class particleSimShader extends Shader {
 
         @group(2) @binding(0) var<uniform> simulation : SimulationUniforms;
         @group(2) @binding(1) var<uniform> ssu: StaticSimulationUniforms;
+        @group(2) @binding(2) var<storage, read> attractors: array<vec3f>;
 
         fn getIndexFromGridPos(gridPos : vec2u) -> u32{
 
@@ -87,13 +88,24 @@ export default class particleSimShader extends Shader {
             applyCollision(global_invocation_index);
         }
 
+        fn attract(particlePos : vec2f, attractorPos : vec2f, mass : f32) -> vec2f{
+            var force = vec2f();
+            let pToA = attractorPos - particlePos;
+            let distance = pow(pToA.x, 2) + pow(pToA.y, 2);
+            force += normalize(pToA) * min(maxAttractorForce, G * (mass * ssu.attractorMass / distance));
+            return force;
+        }
+
         fn applyForces(pos : vec2f, mass : f32) -> vec2f{
             
             var force = vec2f();
             if(simulation.isAttractorEnabled == 1){
-                let pToA = simulation.attractorPos - pos;
-                let distance = pow(pToA.x, 2) + pow(pToA.y, 2);
-                force += normalize(pToA) * min(maxAttractorForce, G * (mass * ssu.attractorMass / distance));
+                force += attract(pos, simulation.attractorPos, mass);
+            }
+
+            for(var i: u32 = 1; i < arrayLength(&attractors); i++){
+                let aPos = attractors[i];
+                force += attract(pos, aPos.xy, mass * aPos.z);
             }
 
             return force;

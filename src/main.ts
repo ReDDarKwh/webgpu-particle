@@ -11,6 +11,7 @@ const { device, canvasFormat, context, stats, settings, input } = await setup();
 const WORKGROUP_SIZE = 60;
 let WORKGROUP_NUM: number;
 let PARTICLE_MAX_COUNT: number;
+let attractors: number[][] = [[0,0,0]];
 
 const particleComputeShader = new particleSimShader(
   WORKGROUP_SIZE,
@@ -63,27 +64,14 @@ const commonBindGroup = device.createBindGroup({
   ],
 });
 
-const simulationBindGroup = device.createBindGroup({
-  label: "simulationBindGroup",
-  layout: simulationBindGroupLayout,
-  entries: [
-    {
-      binding: 0,
-      resource: { buffer: simulationUniformsBuffer },
-    },
-    {
-      binding: 1,
-      resource: { buffer: staticSimulationUniformsBuffer },
-    },
-  ],
-});
-
 let bindGroups: {
   bindGroup0_c: GPUBindGroup | null;
   bindGroup0: GPUBindGroup | null;
+  simulationGroup: GPUBindGroup | null;
 } = {
   bindGroup0: null,
   bindGroup0_c: null,
+  simulationGroup: null
 };
 
 const sampler = device.createSampler({
@@ -120,6 +108,7 @@ const renderPassDescriptor = {
   ],
 };
 
+updateAttractors();
 updateParticleCount();
 updateRenderUniforms();
 updateStaticSimulationUniforms();
@@ -168,7 +157,7 @@ function compute(encoder: GPUCommandEncoder) {
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, commonBindGroup);
     pass.setBindGroup(1, bindGroups.bindGroup0_c);
-    pass.setBindGroup(2, simulationBindGroup);
+    pass.setBindGroup(2, bindGroups.simulationGroup);
     pass.setPipeline(resetPipeline);
     pass.dispatchWorkgroups(WORKGROUP_NUM);
     pass.setPipeline(gridComputePipeline);
@@ -365,6 +354,13 @@ function createLayouts() {
           type: "uniform",
         },
       },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: "read-only-storage",
+        },
+      },
     ],
   });
 
@@ -435,6 +431,50 @@ function shuffle(a: any[]){
   return a.map(value => ({ value, sort: Math.random() }))
   .sort((a, b) => a.sort - b.sort)
   .map(({ value }) => value);
+}
+
+
+function addAttractor(pos: number[], dir: number){
+  attractors.push([...pos, dir]);
+  updateAttractors();
+}
+
+function clearAttractors(){
+  attractors = [[0,0,0]];
+  updateAttractors();
+}
+
+function updateAttractors(){
+  
+  const attractorsView = makeStructuredView(particleComputeShader.storages.attractors, new ArrayBuffer(attractors.length * 4 * 4));
+
+  const buffer = device.createBuffer({
+    size: attractorsView.arrayBuffer.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+
+  attractorsView.set(attractors);
+
+  bindGroups.simulationGroup = device.createBindGroup({
+    label: "simulationBindGroup",
+    layout: simulationBindGroupLayout,
+    entries: [
+      {
+        binding: 0,
+        resource: { buffer: simulationUniformsBuffer },
+      },
+      {
+        binding: 1,
+        resource: { buffer: staticSimulationUniformsBuffer },
+      },
+      {
+        binding: 2,
+        resource: { buffer: buffer},
+      },
+    ],
+  });
+
+  device.queue.writeBuffer(buffer, 0, attractorsView.arrayBuffer);
 }
 
 function updateParticleCount() {
@@ -519,6 +559,8 @@ function updateParticleCount() {
       Math.cos(angle) * speed,
       Math.sin(angle) * speed,
     ]);
+
+    //clearAttractors();
   }
 
   device.queue.writeBuffer(particleStorageBuffer, 0, particleView.arrayBuffer);
@@ -626,8 +668,15 @@ async function setup() {
     input.mousePos = mp;
   });
 
-  document.addEventListener("mousedown", () => {
-    input.isMouseDown = true;
+  document.addEventListener("mousedown", (ev) => {
+
+    if(ev.shiftKey){
+      addAttractor(input.mousePos, 1);
+    } else if(ev.ctrlKey){
+      addAttractor(input.mousePos, -1);
+    } else {
+      input.isMouseDown = true;
+    }
   });
 
   document.addEventListener("mouseup", () => {
@@ -660,6 +709,7 @@ async function setup() {
     startingPosition: "random",
     CoefficientOfRestitution:0.5,
     restart: updateParticleCount,
+    clearAttractors:clearAttractors
   };
 
   gui.useLocalStorage = true;
@@ -682,6 +732,7 @@ async function setup() {
     .add(settings, "startingPosition", ["random", "ring"])
     .onChange(updateParticleCount);
   gui.add(settings, "restart");
+  gui.add(settings, "clearAttractors");
 
   var stats = new Stats();
   stats.showPanel(1); // 0: fps, 1: ms, 2: mb, 3+: custom
