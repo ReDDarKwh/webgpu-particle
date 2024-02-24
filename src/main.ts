@@ -4,7 +4,6 @@ import particleSimShader from "./shaders/particleSimShader";
 import renderParticleShader from "./shaders/renderParticleShader";
 import Shader from "./shaders/shader";
 import { GUI } from "dat.gui";
-import Stats from "stats.js";
 
 const { device, canvasFormat, context, settings, input } = await setup();
 
